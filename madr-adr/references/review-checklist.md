@@ -29,7 +29,7 @@ Use this when the user asks you to review, critique or improve an ADR, and as a 
 
 **Is it verifiable and revisitable?** Is there a Confirmation, or at least a revisit trigger, for decisions that could drift?
 
-**Is the metadata right?** Status matches reality; date is set; people fields only contain real names/groups.
+**Is the metadata right?** Status matches reality; date is set; people fields only contain real names/groups. In a repository, the ADR appears in the folder's `README.md` index with its current status (`scripts/update_index.py --check`).
 
 **Is it the right size?** A good ADR is typically one to two screens. Long design detail, API specs, or how-to instructions belong in linked docs.
 

@@ -28,6 +28,7 @@ PREFERRED_DIRS = [
 SKIP_DIRS = {".git", "node_modules", "vendor", "dist", "build", "target", ".venv", "venv",
              "__pycache__", ".next", ".idea", ".vscode", "coverage"}
 MAX_DEPTH = 6
+INDEX_START, INDEX_END = "<!-- adrlog -->", "<!-- adrlogstop -->"
 
 
 def slugify(title):
@@ -43,7 +44,7 @@ def read_meta(path):
     except OSError:
         return {}
     lines = text.splitlines()
-    meta = {"front_matter": False, "fm_keys": [], "status": None, "title": None,
+    meta = {"front_matter": False, "fm_keys": [], "status": None, "date": None, "title": None,
             "numbered_title": False, "markers": set(), "jtd": False, "nygard": False}
     body_start = 0
     if lines and lines[0].strip() == "---":
@@ -56,8 +57,8 @@ def read_meta(path):
             if m:
                 key = m.group(1).lower()
                 meta["fm_keys"].append(key)
-                if key == "status":
-                    meta["status"] = m.group(2).strip().strip("\"'") or None
+                if key in {"status", "date"}:
+                    meta[key] = m.group(2).strip().strip("\"'") or None
                 if key in {"parent", "nav_order"}:
                     meta["jtd"] = True
     in_code = False
@@ -139,7 +140,8 @@ def summarize(root, adr_dir, title, category):
         meta = read_meta(f)
         metas.append(meta)
         entries.append({"number": int(m.group(1)), "file": f.relative_to(root).as_posix(),
-                        "title": meta.get("title"), "status": meta.get("status")})
+                        "title": meta.get("title"), "status": meta.get("status"),
+                        "date": meta.get("date")})
 
     width = max((len(ADR_FILE_RE.match(f.name).group(1)) for f in files), default=4)
     next_num = max((e["number"] for e in entries), default=0) + 1
@@ -159,6 +161,13 @@ def summarize(root, adr_dir, title, category):
         for mk in m.get("markers", set()):
             markers[mk] = markers.get(mk, 0) + 1
     templates = sorted(p.name for p in adr_dir.glob("adr-template*.md")) if adr_dir.is_dir() else []
+    index_file = adr_dir / "README.md"
+    if not index_file.is_file():
+        index_state = "missing"
+    elif INDEX_START in index_file.read_text(encoding="utf-8", errors="replace"):
+        index_state = "managed"
+    else:
+        index_state = "no index markers"
 
     return {
         "adr_dir": target.relative_to(root).as_posix(),
@@ -168,6 +177,8 @@ def summarize(root, adr_dir, title, category):
         "suggested_file": suggested,
         "categories": categories,
         "templates_in_repo": templates,
+        "index_file": index_file.relative_to(root).as_posix(),
+        "index_state": index_state,
         "conventions": {
             "front_matter": f"{fm_count}/{len(metas)}" if metas else "n/a",
             "front_matter_keys": dict(sorted(keys.items(), key=lambda kv: -kv[1])),
@@ -220,6 +231,7 @@ def main():
         print(f"Categories    : {', '.join(info['categories'])} (numbering is per category; pass --category)")
     if info["templates_in_repo"]:
         print(f"Templates     : {', '.join(info['templates_in_repo'])} (repo has its own copy; prefer it)")
+    print(f"Index file    : {info['index_file']} ({info['index_state']}; refresh with update_index.py)")
     if others:
         print("Other candidate dirs: " + ", ".join(f"{p} ({c})" for p, c in others))
     if info["count"]:
