@@ -1,0 +1,20 @@
+# Run output. The skills write into the current directory, so a run started inside this
+# plugin leaves files here. Never committed: real run output drifts and is project data.
+
+# Onboarding chain (list-repositories → … → get-workflow)
+report.json
+
+# Coverage stats (get-coverage)
+github-repos.json
+github-projects.json
+github-repo-facts.json
+github-products.json
+github-products.previous.json
+products-with-sboms.json
+dtrack-decisions.json
+dt-projects.json
+sbom-adoption.html
+.sbom-coverage/
+
+__pycache__/
+*.pyc

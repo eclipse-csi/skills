@@ -1,0 +1,621 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SBOM onboarding plan",
+  "description": "Schema for ./report.json, the state file the SBOM onboarding chain reads and enriches in the current directory. Top-level keys: `project`, `products`, and the input-only `repos` shorthand. `sources`, `evidence`, `confidence` come from list-products; `release` from get-metadata; `generator` and `pipeline` from get-workflow. Every object is closed, so an unmodelled key is drift, not an extension point.",
+  "type": "object",
+  "anyOf": [{"required": ["project"]}, {"required": ["repos"]}],
+  "properties": {
+    "project": {"$ref": "#/$defs/project"},
+    "products": {
+      "type": "object",
+      "description": "Every product discovered for this project, keyed by registry-safe product name. Written by list-products and enriched in place by later skills. Absent before list-products has run; an empty object means list-products ran and found nothing shippable, which is a different fact from the key being missing.",
+      "additionalProperties": {"$ref": "#/$defs/product"}
+    },
+    "repos": {
+      "$ref": "#/$defs/repos",
+      "description": "Input-only shorthand for a hand-authored report: a bare repo list with no project identity. list-products normalizes it into `project.repos` and deletes this key, so it never appears in a report that a skill has written. Use `project.repos` in preference to this."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "project": {
+      "type": "object",
+      "description": "The project being onboarded. `repos` is the full repository list; `coverage_gaps` records shipping repos that no product covers.",
+      "required": ["repos"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "PMI project_id, dotted and full (e.g. ecd.jkube). Never the short form."
+        },
+        "short_id": {"type": "string", "description": "PMI short_project_id (e.g. jkube)."},
+        "name": {"type": "string", "description": "Display name (e.g. \"Eclipse JKube\")."},
+        "github_orgs": {"type": "array", "items": {"type": "string"}},
+        "coverage_gaps": {
+          "type": "array",
+          "description": "Shipping repositories with no path to an SBOM, and what would unblock each. Recorded here rather than invented as products: deciding a product exists is list-products' job.",
+          "items": {"$ref": "#/$defs/coverage_gap"}
+        },
+        "repos": {"$ref": "#/$defs/repos"}
+      },
+      "additionalProperties": false
+    },
+    "coverage_gap": {
+      "type": "object",
+      "description": "One shipping repository with no path to an SBOM, and what would unblock it. Deliberately NOT a product: get-workflow never invents a product, because deciding that a product exists is list-products' job and a pipeline block cannot hang from an entry that does not exist.",
+      "required": ["repo", "reason", "blocking_stage"],
+      "properties": {
+        "repo": {"type": "string", "description": "org/repo, matching an entry in project.repos."},
+        "reason": {
+          "type": "string",
+          "description": "Why this repo has no SBOM, in terms a maintainer can act on."
+        },
+        "ecosystem_hint": {
+          "type": "string",
+          "description": "What it appears to ship, when the ecosystems enum has no value for it — e.g. \"helm charts\", \"snap package\". Free text precisely because the enum could not express it."
+        },
+        "blocking_stage": {
+          "enum": ["list-products", "get-metadata", "get-workflow", "no-tool-exists"],
+          "description": "Which stage has to change for this gap to close. `list-products` means the repo needs to become a product (often after an enum extension); `no-tool-exists` means no generator in tool_selection.md covers it at any score, so no re-run helps."
+        },
+        "remediation": {
+          "type": "string",
+          "description": "The specific next action — re-run a named skill, migrate a toolchain, accept the gap. An unactionable gap entry is a complaint, not a finding."
+        }
+      },
+      "additionalProperties": false
+    },
+    "repos": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The project's code repositories.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$",
+            "description": "org/repo, e.g. eclipse-jkube/jkube. The org must start with an alphanumeric; the repo may start with a dot, since org meta repos legitimately do (eclipse-csi/.github). Bare repo names, full GitHub URLs and org-only values are invalid; a reader that finds one must treat the list as unusable rather than guess."
+          },
+          "ships": {
+            "type": "boolean",
+            "description": "Filled by list-products. Absent until classified."
+          },
+          "note": {
+            "type": "string",
+            "description": "Short reason for the ships verdict, or the repo's role."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "description": "What was actually found and inspected to justify a claim. Used by both list-products (why this product exists) and get-metadata (why these release facts are believed).",
+      "items": {
+        "type": "object",
+        "required": ["type", "locator"],
+        "properties": {
+          "type": {
+            "enum": [
+              "build-file",
+              "registry-listing",
+              "release-history",
+              "pipeline-file",
+              "readme",
+              "other"
+            ]
+          },
+          "locator": {"type": "string", "description": "A file path within a source repo, or a URL."},
+          "note": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "description": "How settled a set of findings is. Used by both list-products (on the product) and get-metadata (on the release block), so a consumer can tell a verified fact from an inference and know when to stop and ask.",
+      "required": ["level", "reasons"],
+      "properties": {
+        "level": {"enum": ["high", "medium", "low"]},
+        "reasons": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "needs_review": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Open questions a human must resolve. Required non-empty unless level is high."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {"if": {"properties": {"level": {"const": "high"}}, "required": ["level"]}, "then": {}},
+        {
+          "if": {"properties": {"level": {"enum": ["medium", "low"]}}, "required": ["level"]},
+          "then": {"required": ["needs_review"], "properties": {"needs_review": {"minItems": 1}}}
+        }
+      ]
+    },
+    "build": {
+      "type": "object",
+      "description": "How ONE build root resolves its dependencies. Lives per source because these facts vary per build root. EVERY field must be OBSERVED — read from the release pipeline or from files at the build root — never inferred from the ecosystem: a guessed resolution flag produces an SBOM describing something that was never shipped. Express absence by omitting the field and adding a needs_review entry.",
+      "properties": {
+        "archetype": {
+          "description": "The build's shape, where it changes the generator invocation. `multi-module-aggregate` needs an aggregate goal; `platform-variant` means the resolved set differs per target and needs `matrix`; `shaded-uber-artifact` means dependencies are relocated into one artifact a resolver cannot see, which is a coverage gap; `workspace-monorepo` means several workspace members resolve together.",
+          "enum": [
+            "single-module",
+            "multi-module-aggregate",
+            "shaded-uber-artifact",
+            "workspace-monorepo",
+            "platform-variant",
+            "unknown"
+          ]
+        },
+        "toolchain": {
+          "type": "object",
+          "description": "Tool name to version, as the RELEASE uses them — e.g. {\"java\": \"21\", \"maven\": \"3.9.6\"}. Read from the release pipeline's setup-* steps or from .tool-versions / .nvmrc / global.json. The workflow must resolve on the same toolchain the release did.",
+          "additionalProperties": {"type": "string"}
+        },
+        "lockfiles": {
+          "type": "array",
+          "description": "Lockfiles present at this build root. Decides tool selection outright for JavaScript (package-lock.json / yarn.lock / pnpm-lock.yaml select three different generators) and mode selection for Python (a lockfile or resolved venv scores far higher than manifest-only resolution).",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": {"type": "string", "description": "Path relative to the build root."},
+              "committed": {
+                "type": "boolean",
+                "description": "True if the lockfile is committed to the repo. A lockfile generated during the build is NOT an immutable input and cannot support hook.immutable_input = tag-and-lockfile."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "resolution_flags": {
+          "type": "object",
+          "description": "Inputs that change what the resolver returns, as observed in the release — e.g. {\"GOOS\": \"linux\"}, {\"MIX_ENV\": \"prod\"}, {\"composer\": \"--no-dev\"}. The generated workflow must pass the equivalent, or the SBOM describes a build that was never shipped.",
+          "additionalProperties": {"type": "string"}
+        },
+        "matrix": {
+          "type": "array",
+          "description": "One entry per build-matrix target the release actually produces. A matrixed build root needs ONE SBOM PER ENTRY — several generators bake the target into the document — so a single SBOM for a matrixed product is silently wrong.",
+          "items": {"type": "object", "additionalProperties": {"type": "string"}}
+        },
+        "build_command": {
+          "type": "string",
+          "description": "The release job's build command, verbatim. Recorded so the SBOM workflow can mirror the resolution the release performed rather than re-derive it — this is what build-graph fidelity is scored on."
+        },
+        "credentials_required": {
+          "type": "array",
+          "description": "What dependency resolution needs in order to succeed — a settings.xml for a private Maven repository, an .npmrc token, a private NuGet feed, HEX_API_KEY, FETCH_LICENSE plus a GitHub token. Without these the generated workflow either fails outright or silently emits a thin SBOM, so an unresolvable build must be reported, not attempted.",
+          "items": {"type": "string"}
+        },
+        "reproducible": {
+          "type": "object",
+          "description": "Whether the build pins its own timestamps, which determines whether two SBOM runs are byte-comparable and whether release-to-release SBOM diffs are readable.",
+          "required": ["mechanism"],
+          "properties": {
+            "mechanism": {"enum": ["source-date-epoch", "maven-output-timestamp", "other", "none-found"]},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "release": {
+      "type": "object",
+      "description": "How this product is versioned and released, and where SBOM generation attaches. Written by get-metadata, once per product — a product has one version and one cadence by definition. If two things in a product release on different schedules they are two products, which is list-products' call to make, not something to encode here.",
+      "required": ["versioning", "pipelines", "hook"],
+      "properties": {
+        "mechanism": {
+          "type": "array",
+          "description": "Where releases land, e.g. [\"maven-central\", \"github-release\"].",
+          "items": {"type": "string"}
+        },
+        "versioning": {
+          "type": "object",
+          "required": ["defines_release", "links"],
+          "properties": {
+            "defines_release": {
+              "description": "Which signal this product actually treats as \"released\". This is the event the SBOM must be produced for.",
+              "enum": [
+                "git-tag",
+                "github-release",
+                "registry-version",
+                "manifest-version",
+                "none-found"
+              ]
+            },
+            "scheme": {
+              "type": "string",
+              "description": "semver, calver, eclipse major.minor.service, other."
+            },
+            "tag_pattern": {"type": "string"},
+            "snapshot_suffix": {"type": "string"},
+            "version_of_record": {"type": "string"},
+            "links": {
+              "type": "array",
+              "minItems": 1,
+              "description": "Openable URLs. Manifests must be commit-pinned permalinks, not blob/main.",
+              "items": {"type": "string"}
+            }
+          },
+          "additionalProperties": false
+        },
+        "pipelines": {
+          "type": "array",
+          "description": "Every pipeline that builds or publishes this product.",
+          "items": {
+            "type": "object",
+            "required": ["file", "url", "role"],
+            "properties": {
+              "file": {"type": "string"},
+              "url": {"type": "string", "description": "Commit-pinned permalink."},
+              "trigger": {"type": "string", "description": "Verbatim, as written in the pipeline."},
+              "role": {"enum": ["release", "ci", "nightly"]},
+              "ci_system": {
+                "description": "Jenkins and GitLab CI are out of scope for workflow generation but must still be recorded — a product released from them cannot be completed by get-workflow, and that is a coverage gap, not an omission.",
+                "enum": ["github-actions", "jenkins", "gitlab-ci", "other"]
+              },
+              "emits_sbom": {
+                "type": "object",
+                "description": "Whether this pipeline already produces an SBOM, and what kind. An object rather than a boolean because replacing working SBOM generation is a maintainer's decision, and `true` alone gives the builder nothing to reason with.",
+                "required": ["present"],
+                "properties": {
+                  "present": {"type": "boolean"},
+                  "format": {"type": "string", "description": "cyclonedx | spdx | other."},
+                  "spec_version": {"type": "string"},
+                  "tool": {"type": "string"}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "hook": {
+          "type": "object",
+          "description": "Where SBOM generation attaches. Defaults to a standalone workflow, because a broken SBOM step cannot fail a release it is not part of.",
+          "required": ["strategy", "on", "rationale", "blocks_release"],
+          "properties": {
+            "strategy": {"enum": ["new-workflow", "extend-existing"]},
+            "target": {
+              "type": "string",
+              "description": "Required when strategy is extend-existing; omitted otherwise."
+            },
+            "on": {
+              "description": "Must match the event the existing release listens for. Never workflow_run — that was a High-severity finding in earlier prototype workflows.",
+              "enum": ["github-release", "tag", "manual"]
+            },
+            "tag_pattern": {"type": "string"},
+            "verified_against_history": {
+              "type": "boolean",
+              "description": "True when the recorded trigger and tag pattern were checked against actual past releases, not just read off the pipeline's on: block."
+            },
+            "immutable_input": {
+              "description": "What the standalone workflow can rebuild from, in descending fidelity. `oci-digest` describes exactly the shipped bytes; `tag-and-lockfile` pins resolution; `tag-only` re-resolves and can drift; `none` means only the release job holds the truth, which forces extend-existing. An enum rather than free text so the builder can act on it.",
+              "enum": ["oci-digest", "tag-and-lockfile", "tag-only", "none"]
+            },
+            "rationale": {"type": "string"},
+            "fidelity_risk": {
+              "type": ["string", "null"],
+              "description": "How the SBOM could fail to match the released artifact. Null only when immutable_input is oci-digest."
+            },
+            "blocks_release": {"type": "boolean"},
+            "multi_source": {
+              "type": "object",
+              "description": "How a product spanning several sources becomes one deliverable. Only meaningful when the product has more than one source entry.",
+              "required": ["strategy"],
+              "properties": {
+                "strategy": {
+                  "description": "`merge` combines the per-source SBOMs into one; `link` keeps them as separate component SBOMs referenced from the primary, which BSI TR-03183-2 permits when each is itself conformant; `single` when only one source actually ships.",
+                  "enum": ["merge", "link", "single"]
+                },
+                "host_repo": {
+                  "type": "string",
+                  "description": "org/repo that will host the workflow. A multi-repo product's pipeline can only live in one of them."
+                },
+                "rationale": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {"strategy": {"const": "extend-existing"}},
+                "required": ["strategy"]
+              },
+              "then": {"required": ["target"]}
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "generator_entry": {
+      "type": "object",
+      "description": "One generator invocation and why. At product scope rather than on `sources[]` because the mapping runs both ways: one generator can cover several sources, and one source can need two. The optional `source` pointer says which build root this applies to; absent means product-wide.",
+      "required": ["ecosystem", "tool", "assessment", "route"],
+      "properties": {
+        "tool_version": {
+          "type": "string",
+          "description": "The version pinned in the generated workflow. Floating a generator version is as damaging as floating an action tag: several generators changed their DEFAULT CycloneDX spec version within a single year."
+        },
+        "tool": {"type": "string", "description": "Generator name as tool_selection.md §3 names it."},
+        "route": {
+          "enum": ["artifact-type", "polyglot-ort", "per-ecosystem", "gap"],
+          "description": "Which branch of tool_selection.md §1/§2 produced this choice. Recorded so a later routing change can find every decision it invalidates without re-deriving them."
+        },
+        "role": {
+          "enum": ["primary", "supplement"],
+          "description": "`primary` is the document that describes the product. `supplement` is a second generator covering something the primary structurally cannot see — the shaded-uber-artifact case. Supplements are NOT merged automatically: merging a resolved build graph into an image scan is a decision for the maintainer. Default when omitted: primary."
+        },
+        "ecosystem": {
+          "type": "string",
+          "description": "The ecosystem value this routing decision was made for. A string rather than the sources[] enum because a routing decision can be more specific than the enum can express — `yarn-classic` vs `yarn-berry` is the case that forced this, and it changes the tool outright."
+        },
+        "source": {
+          "type": "object",
+          "description": "The (repo, path) this generator runs against, matching a `sources[]` entry. Omit for a product-wide generator such as ORT.",
+          "required": ["repo", "path"],
+          "properties": {"repo": {"type": "string"}, "path": {"type": "string"}},
+          "additionalProperties": false
+        },
+        "assessment": {
+          "enum": ["ok", "documented-gap"],
+          "description": "Whether tool_selection.md routes this (tool, ecosystem) pair to a generator that resolves the build graph. `ok` — the route is sound and the SBOM will describe what was shipped. `documented-gap` — the best available tool cannot see part of what ships, which is defensible only when `coverage_gap` says exactly what is missing. Replaces the former 1–5 band: the rubric that produced those numbers no longer ships, and an unbacked score reads as more precise than it is."
+        },
+        "invocation": {
+          "type": "string",
+          "description": "The exact command written into the workflow, including the flags that pin the spec version and scope resolution to what the release shipped."
+        },
+        "spec_version_control": {
+          "enum": ["native-1.6", "flag", "output-suffix", "convert-required"],
+          "description": "HOW CycloneDX 1.6 is obtained. `native-1.6` by default; `flag` needs a selector; `output-suffix` encodes it in -o; `convert-required` means a cyclonedx-cli step is mandatory. Recorded because this is the field most likely to be invalidated by a tool update, and whose silent drift produces an SBOM the registry rejects."
+        },
+        "targets": {
+          "type": "array",
+          "description": "One entry per build-matrix target this generator runs for, mirroring sources[].build.matrix. A matrixed build root needs ONE SBOM PER TARGET — several generators bake the target into the document — so a single entry here for a matrixed source is a bug, not a simplification.",
+          "items": {"type": "object"}
+        },
+        "coverage_gap": {
+          "type": "object",
+          "description": "What this generator cannot see. REQUIRED whenever `assessment` is `documented-gap`, because a below-floor choice is only defensible as a documented gap.",
+          "required": ["severity", "summary"],
+          "properties": {
+            "severity": {"enum": ["minor", "major", "blocking"]},
+            "summary": {
+              "type": "string",
+              "description": "What is missing from the resulting SBOM, concretely — \"no dependency edges\", \"transitives absent\", \"licences unpopulated\" — not \"partial support\"."
+            },
+            "remediation": {
+              "type": "string",
+              "description": "What would close it: migrate a toolchain, add a supplement generator, wait for a named upstream release."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "The CRA floor, expressed in the schema: a gap route must carry its gap. This is the one rule that must not be negotiable at write time.",
+          "if": {
+            "properties": {"assessment": {"const": "documented-gap"}},
+            "required": ["assessment"]
+          },
+          "then": {"required": ["coverage_gap"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "pipeline": {
+      "type": "object",
+      "description": "What get-workflow did for this product — written for EVERY product it considered, including refusals. The generated workflow is carried inline in `workflow.content`; no file is written for it, so this is its only record.",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": [
+            "generated",
+            "partial",
+            "patch-proposed",
+            "already-conformant",
+            "needs-input",
+            "blocked",
+            "no-path",
+            "out-of-scope"
+          ],
+          "description": "`generated` — a hardened workflow was emitted and every gate enforced. `partial` — emitted, but a routed generator carries a documented gap. `patch-proposed` — extend-existing, so `workflow` is a step block (`kind: patch`), not a whole file. `needs-input` — a mandatory resolution input or action pin could not be observed. `blocked` — refused: unconfirmed product boundary, low confidence, or a credential unavailable to GitHub Actions. `no-path` — no generator exists for this ecosystem. `already-conformant` — already emits a conformant SBOM and was left alone; a success, not a gap. `out-of-scope` — the hook target is not GitHub Actions, so no OIDC token."
+        },
+        "host_repo": {
+          "type": "string",
+          "description": "org/repo the workflow is installed into. For a multi-repo product this is a judgment call carried over from release.hook.multi_source.host_repo."
+        },
+        "tool_selection_revision": {
+          "type": "string",
+          "description": "The dated revision of tool_selection.md this routing came from, e.g. \"2026-08-05\". The generated workflow is only justified by that revision; when the routing table is revised, this field is what names the already-generated workflows the change invalidates, instead of re-deriving every decision or silently leaving them stale."
+        },
+        "workflow": {
+          "type": "object",
+          "description": "The generated workflow, inline because no file is written for it. This field and the skill's reply are the only two places it exists and must agree verbatim. The maintainer installs it by copying it to `install_as`; nothing in the chain does that for them.",
+          "required": ["install_as", "kind", "content"],
+          "properties": {
+            "install_as": {
+              "type": "string",
+              "description": "Path inside the target repo the content belongs at, e.g. `.github/workflows/sbom-jkube.yml`. A destination, not a file that exists anywhere. For `kind: patch` this is the EXISTING workflow the step block is inserted into, so the two kinds must not be conflated: copying a patch fragment in as a whole workflow yields something that does not run.",
+              "minLength": 1
+            },
+            "kind": {
+              "enum": ["workflow", "patch"],
+              "description": "`workflow` — a complete, standalone file. `patch` — a step block to insert into the pipeline named by `install_as`, for extend-existing."
+            },
+            "content": {
+              "type": "string",
+              "description": "The workflow YAML verbatim, exactly as printed in the reply. Its header comment carries the secrets required, the recorded coverage gaps in plain language, the TODO(upload) explanation, and a zizmor line to run before installing.",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "description": "Of `content`. Lets a later run detect that a recorded workflow was hand-edited in the report."
+            }
+          },
+          "additionalProperties": false
+        },
+        "trigger": {
+          "type": "object",
+          "description": "What fires the generated workflow. Mirrors the trigger the existing release actually uses — never workflow_run, which was a High-severity finding in the prototypes.",
+          "required": ["on"],
+          "properties": {
+            "on": {"enum": ["github-release", "tag", "manual"]},
+            "events": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "The literal GitHub Actions events written into the on: block."
+            },
+            "tag_pattern": {"type": "string"},
+            "automatic": {
+              "type": "boolean",
+              "description": "False for a manual trigger. A manual-only SBOM fires when someone remembers, which is a coverage gap and must be reported as one rather than counted as onboarded."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "Generating a workflow means the provenance is recorded. There is no way to claim one was produced without carrying its content, the path it belongs at, and the routing revision it came from.",
+          "if": {"properties": {"status": {"enum": ["generated", "partial"]}}, "required": ["status"]},
+          "then": {"required": ["workflow", "host_repo", "trigger", "tool_selection_revision"]}
+        },
+        {
+          "$comment": "Not generating is a positively asserted fact with a stated reason, never an omission. needs_review must name what a human has to resolve.",
+          "if": {
+            "properties": {"status": {"enum": ["needs-input", "blocked", "no-path", "out-of-scope"]}},
+            "required": ["status"]
+          },
+          "then": {
+            "not": {"required": ["workflow"]},
+            "required": ["confidence"],
+            "properties": {
+              "confidence": {"properties": {"needs_review": {"minItems": 1}}, "required": ["needs_review"]}
+            }
+          }
+        },
+        {
+          "$comment": "already-conformant produces nothing, and unlike a refusal it has nothing outstanding — so it is exempt from the non-empty needs_review rule, but must still carry no workflow."
+        },
+        {
+          "if": {"properties": {"status": {"const": "already-conformant"}}, "required": ["status"]},
+          "then": {"not": {"required": ["workflow"]}}
+        },
+        {
+          "$comment": "A patch is a step block for a human to apply to a pipeline that already ships software, not a whole file to drop in. Forcing kind: patch here keeps a maintainer from copying a fragment in as a standalone workflow.",
+          "if": {"properties": {"status": {"const": "patch-proposed"}}, "required": ["status"]},
+          "then": {
+            "required": ["workflow"],
+            "properties": {"workflow": {"properties": {"kind": {"const": "patch"}}}}
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "product": {
+      "type": "object",
+      "description": "One entry per product under the top-level `products` object, named for the registry (e.g. `jkube`, `<short_id>-<component>`). The key is the product's identity — no separate `name` field.",
+      "$comment": "sources/evidence/confidence are written by list-products, release by get-metadata, generator and pipeline by get-workflow. All are now constrained, so additionalProperties is closed: an unmodelled key is drift, not an extension point. A skill that needs a new field extends this schema in the same change.",
+      "required": ["sources", "evidence", "confidence"],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Every (repo, build root) this product is assembled from. A multi-repo product lists one entry per repo; a monorepo product that mixes ecosystems at one path lists more than one ecosystem on that single entry.",
+          "items": {
+            "type": "object",
+            "required": ["repo", "path", "ecosystems"],
+            "properties": {
+              "repo": {"type": "string", "description": "org/repo, matching an entry in project.repos."},
+              "path": {
+                "type": "string",
+                "description": "Build root within the repo. \".\" for the repo root."
+              },
+              "ecosystems": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Each value names the **resolver** that selects the generator, not the language. Where a language has one resolver the value is the language (`go`, `rust`, `php`); where it has several routing to different tools, the value is the resolver (`npm`/`yarn`/`pnpm`, `maven`/`gradle`/`sbt`). Pick the most specific value the evidence supports. See tool_selection.md for resolver-to-tool routing.",
+                "items": {
+                  "enum": [
+                    "maven",
+                    "maven-tycho",
+                    "gradle",
+                    "sbt",
+                    "mill",
+                    "clojure",
+                    "npm",
+                    "yarn",
+                    "pnpm",
+                    "python",
+                    "conda",
+                    "go",
+                    "rust",
+                    "dotnet",
+                    "php",
+                    "ruby",
+                    "elixir",
+                    "erlang",
+                    "swift",
+                    "dart",
+                    "perl",
+                    "ocaml",
+                    "haskell",
+                    "lua",
+                    "r",
+                    "nix",
+                    "conan",
+                    "vcpkg",
+                    "cpp-unmanaged",
+                    "container",
+                    "deb",
+                    "rpm",
+                    "apk",
+                    "terraform",
+                    "snap"
+                  ]
+                }
+              },
+              "build": {
+                "$ref": "#/$defs/build",
+                "description": "How this build root resolves. Written by get-metadata onto the entry list-products created; absent until it has run."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "release": {"$ref": "#/$defs/release"},
+        "generator": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Which SBOM generator runs for this product, and why. Written by get-workflow. An array because the mapping to sources is not one-to-one in either direction — see #/$defs/generator_entry.",
+          "items": {"$ref": "#/$defs/generator_entry"}
+        },
+        "pipeline": {"$ref": "#/$defs/pipeline"},
+        "_meta": {
+          "type": "object",
+          "required": ["schema_version"],
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The report shape this product's data conforms to. 1 is the first published version. Never lowered: re-running an early skill over a fuller report must not claim the later stages away."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

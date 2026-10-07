@@ -1,0 +1,10 @@
+{
+  "name": "sbom",
+  "version": "0.1.0",
+  "description": "Get open source projects onto automated SBOM generation and track adoption: enumerate a project's repositories, identify the products it ships, work out how each releases, generate hardened GitHub Actions workflows that produce a CycloneDX 1.6 SBOM for every release, and measure SBOM coverage across all Eclipse projects with a dashboard.",
+  "author": {
+    "name": "Eclipse CSI"
+  },
+  "repository": "https://github.com/eclipse-csi/skills",
+  "keywords": ["sbom", "cyclonedx", "supply-chain", "cra", "github-actions", "dependency-track"]
+}
