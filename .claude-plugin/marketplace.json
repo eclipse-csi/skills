@@ -1,0 +1,30 @@
+{
+  "name": "eclipse-csi",
+  "owner": {
+    "name": "Eclipse CSI"
+  },
+  "metadata": {
+    "description": "Eclipse CSI agentic AI skills"
+  },
+  "plugins": [
+    {
+      "name": "conventional-commits",
+      "description": "Write git commit messages that follow the Conventional Commits 1.0.0 specification and create the commit.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./conventional-commits"]
+    },
+    {
+      "name": "madr-adr",
+      "description": "Write, review and maintain Architectural Decision Records in the MADR 4.x format.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./madr-adr"]
+    },
+    {
+      "name": "sbom",
+      "description": "Onboard projects onto automated CycloneDX SBOM generation and track SBOM adoption across Eclipse projects.",
+      "source": "./sbom"
+    }
+  ]
+}

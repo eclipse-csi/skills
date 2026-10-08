@@ -1,0 +1,670 @@
+<title>Eclipse SBOM Adoption</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#f5f7f9; --panel:#ffffff; --ink:#161a20; --ink-2:#4a525e; --ink-3:#6f7885;
+  --rule:#dde2e8; --track:#e3e8ee; --covered:#2a78d6; --covered-ink:#1c5cab;
+  --focus:#2a78d6; --chip:#eaf1fb;
+  --good-bg:#e7f5ea; --good-edge:#1f9d4c; --good-ink:#146c34;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s-other:#a9b0b9;
+  --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark; --ground:#121417; --panel:#1a1d21; --ink:#eef1f4; --ink-2:#b7bfca; --ink-3:#8b94a0;
+  --rule:#2c3138; --track:#2e343b; --covered:#3987e5; --covered-ink:#86b6ef; --focus:#5598e7;
+  --chip:#1c2a3d; --good-bg:#16291c; --good-edge:#3fb96b; --good-ink:#7fd9a0; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s-other:#6b727c;}}
+:root[data-theme="dark"]{
+  color-scheme:dark; --ground:#121417; --panel:#1a1d21; --ink:#eef1f4; --ink-2:#b7bfca; --ink-3:#8b94a0;
+  --rule:#2c3138; --track:#2e343b; --covered:#3987e5; --covered-ink:#86b6ef; --focus:#5598e7;
+  --chip:#1c2a3d; --good-bg:#16291c; --good-edge:#3fb96b; --good-ink:#7fd9a0; --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s-other:#6b727c;}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:16px/1.5 var(--body);margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px);padding-block:32px 64px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
+h1{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-.01em;line-height:1.1}
+h2{font-size:21px;font-weight:700;letter-spacing:-.005em}
+h3{font-size:15px;font-weight:700}
+p{margin:0}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.lede{color:var(--ink-2);max-width:68ch;margin-top:10px}
+.scope{display:flex;gap:12px;align-items:flex-start;margin-top:14px;padding:10px 14px;background:var(--chip);border:1px solid var(--rule);border-radius:8px;color:var(--ink);max-width:88ch;font-size:15px}
+.scope-tag{font:500 11px/1.9 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--covered-ink);border:1px solid currentColor;border-radius:4px;padding:0 6px;flex:0 0 auto}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header.top{display:grid;gap:8px;margin-bottom:24px}
+/* filters */
+.filters{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end;padding:14px 16px;background:var(--panel);border:1px solid var(--rule);border-radius:10px;margin-bottom:28px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.filters label{display:grid;gap:4px;font-size:12px;color:var(--ink-3);font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+select,input[type=search]{font:15px var(--body);color:var(--ink);background:var(--ground);border:1px solid var(--rule);border-radius:6px;padding:6px 10px;min-width:0}
+.check{display:flex!important;flex-direction:row;align-items:center;gap:8px;text-transform:none!important;font:15px var(--body)!important;color:var(--ink)!important;letter-spacing:0!important;padding-bottom:6px}
+.check input{width:16px;height:16px;accent-color:var(--covered)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.filters .count{margin-left:auto;font-size:13px;color:var(--ink-3);padding-bottom:7px}
+/* headline */
+.headline{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr);gap:28px;align-items:center;padding-block:8px 28px;border-bottom:1px solid var(--rule);margin-bottom:32px}
+.hero-num{font:800 clamp(56px,9vw,96px)/.9 var(--display);letter-spacing:-.03em}
+.hero-num small{font-size:.38em;font-weight:700;color:var(--ink-2);letter-spacing:0;margin-left:6px}
+.meter{height:12px;border-radius:6px;background:var(--track);overflow:hidden;margin-top:14px}
+.meter i{display:block;height:100%;background:var(--covered);border-radius:6px 0 0 6px;min-width:3px}
+.hero-cap{margin-top:10px;color:var(--ink-2)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:18px 24px}
+.stat .v{font:600 26px/1.1 var(--mono);font-variant-numeric:tabular-nums}
+.stat .l{font-size:14px;color:var(--ink-2);margin-top:4px;line-height:1.35}
+.stat .l .dim{font-size:12.5px}
+.kpi{display:grid;gap:0;align-self:center}
+.kpi-row{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(0,1fr) 1.5em minmax(0,1fr);align-items:center;gap:6px 12px;padding:12px 4px;border-top:1px solid var(--rule)}
+.kpi-row:first-child{border-top:0}
+.kpi-head{padding:0 4px 6px;font:500 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.kpi-label{font-weight:600;font-size:15px;display:grid;line-height:1.25}
+.kpi-label small{font-weight:400;font-size:12.5px;color:var(--ink-3)}
+.kpi-v{font:600 clamp(20px,2.6vw,26px)/1.1 var(--mono);font-variant-numeric:tabular-nums}
+.kpi-arrow{color:var(--ink-3);text-align:center;font-size:18px}
+.kpi-sb .kpi-v{color:var(--covered-ink)}
+@media (max-width:480px){.kpi-row{grid-template-columns:1fr 1fr 1.2em 1fr}.kpi-label{grid-column:1/-1}.kpi-head span:first-child{display:none}.kpi-head{grid-template-columns:1fr 1.2em 1fr}}
+.hero-2{margin-top:18px;padding-top:14px;border-top:1px solid var(--rule)}
+.hero-num2{font:800 clamp(32px,5vw,44px)/1 var(--display);letter-spacing:-.02em}
+.hero-num2 small{font-size:.5em;font-weight:700;color:var(--ink-2);margin-left:4px}
+.meter-sm{height:8px;margin-top:10px}
+/* sections */
+section{margin-top:40px}
+.sec-head{display:grid;gap:6px;margin-bottom:16px;max-width:76ch}
+.sec-head p{color:var(--ink-2)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:24px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 18px 14px}
+.panel h3{margin-bottom:4px}
+.panel .sub{font-size:14px;color:var(--ink-3);margin-bottom:12px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);margin-bottom:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+/* bar rows (HTML bars for crisp responsive text) */
+.bars{display:grid;gap:7px}
+.bar{display:grid;grid-template-columns:minmax(96px,34%) 1fr auto;gap:10px;align-items:center;font-size:14px;padding:2px 4px;border-radius:5px;cursor:default}
+.bar:hover,.bar:focus-visible{background:var(--chip)}
+.bar .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.bar .track{height:14px;background:var(--track);border-radius:0 4px 4px 0;position:relative;overflow:hidden}
+.bar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--covered)}
+.bar .val{font:500 13px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2);min-width:7.5ch;text-align:right}
+.note{font-size:13px;color:var(--ink-3);margin-top:12px}
+.pie-wrap{display:flex;flex-wrap:wrap;gap:18px 24px;align-items:center}
+.pie-wrap svg{width:min(220px,100%);height:auto;flex:0 0 auto}
+.pie-legend{display:grid;gap:6px;font-size:14px;flex:1 1 200px;min-width:0}
+.pie-legend .li{display:grid;grid-template-columns:12px 1fr auto auto;gap:8px;align-items:center;padding:1px 4px;border-radius:4px}
+.pie-legend .li:hover,.pie-legend .li:focus-visible{background:var(--chip)}
+.pie-legend .pct{font:500 13px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);min-width:5ch;text-align:right}
+.pie-legend .cnt{font:400 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-3);min-width:6ch;text-align:right}
+.sortl{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-2)}
+.etable td{vertical-align:middle}
+.ptoggle{font:500 13px var(--mono);color:var(--covered-ink);background:none;border:1px solid var(--rule);border-radius:6px;padding:3px 8px;cursor:pointer;white-space:nowrap}
+.ptoggle:hover{background:var(--chip)}
+.ptoggle .chev{display:inline-block;transition:transform .12s;margin-right:4px}
+.ptoggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.prow td{background:var(--ground);padding:6px 12px 10px 28px}
+.subt{width:100%;min-width:0;font-size:13px;border-collapse:collapse}
+.subt td{border-bottom:1px solid var(--rule);padding:4px 8px;background:transparent}
+.subt tr:last-child td{border-bottom:0}
+.pp-head,.pp-row{display:grid;grid-template-columns:minmax(110px,30%) 1fr 8.5ch;gap:10px;align-items:center}
+.pp-head{font:500 12px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:0 4px 6px;border-bottom:1px solid var(--rule)}
+.pp-head span:last-child{text-align:right}
+.pp-scroll{max-height:460px;overflow-y:auto;display:grid;gap:5px;padding:6px 2px 2px;align-content:start}
+.pp-row{font-size:14px;padding:2px 4px;border-radius:5px;cursor:pointer}
+.pp-row:hover{background:var(--chip)}
+.pp-row.has-sbom{background:var(--good-bg);box-shadow:inset 3px 0 0 var(--good-edge)}
+.pp-row.has-sbom:hover{background:var(--good-bg);filter:brightness(.97)}
+.pp-row.has-sbom .pp-val{color:var(--good-ink);font-weight:600}
+.pp-row .name::before{content:'›';display:inline-block;width:1em;color:var(--ink-3);transition:transform .12s}
+.pp-row[aria-expanded="true"] .name::before{transform:rotate(90deg)}
+.pp-detail{margin:0 4px 6px 1.4em;padding:10px 12px;border-left:2px solid var(--rule);display:grid;gap:10px;font-size:13px}
+.pp-group h4{margin:0 0 4px;font:600 13px var(--body);display:flex;align-items:center;gap:8px;color:var(--ink)}
+.pp-group h4 .gc{font:400 12px var(--mono);color:var(--ink-3)}
+.pp-group ul{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.pp-group li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:baseline}
+.pp-group li .pn{font-family:var(--mono);overflow-wrap:anywhere}
+.pp-group li .pm{color:var(--ink-3);font-size:12px;text-align:right}
+.pp-group li .pm b{font-weight:600;color:var(--good-ink)}
+.sw.good{background:var(--good-bg);box-shadow:inset 3px 0 0 var(--good-edge);outline:1px solid var(--good-edge)}
+.pp-row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-bar{display:flex;height:14px;gap:2px;min-width:0}
+.pp-bar i{display:block;height:100%;min-width:3px;border-radius:0}
+.pp-bar i:first-child{border-radius:0 0 0 0}
+.pp-bar i:last-child{border-radius:0 4px 4px 0}
+.pp-val{font:500 13px var(--mono);font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-3);white-space:nowrap}
+.pp-val.has{color:var(--covered-ink)}
+.panel-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;margin-bottom:4px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden;font-size:13px}
+.seg label{display:block;cursor:pointer}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;padding:4px 12px;color:var(--ink-2)}
+.seg label+label span{border-left:1px solid var(--rule)}
+.seg input:checked+span{background:var(--chip);color:var(--covered-ink);font-weight:600}
+.seg input:focus-visible+span{outline:2px solid var(--focus);outline-offset:-2px}
+.e-conds{gap:6px 18px;padding:8px 10px;background:var(--ground);border:1px solid var(--rule);border-radius:8px}
+.dd{position:relative}
+.dd summary{list-style:none;cursor:pointer;font:15px var(--body);color:var(--ink);background:var(--ground);border:1px solid var(--rule);border-radius:6px;padding:6px 10px;display:flex;gap:8px;align-items:center}
+.dd summary::-webkit-details-marker{display:none}
+.dd summary::after{content:'▾';color:var(--ink-3);font-size:12px}
+.dd-count{font:500 12px var(--mono);color:var(--covered-ink);background:var(--chip);border-radius:999px;padding:0 7px}
+.dd-menu{position:absolute;z-index:6;top:calc(100% + 4px);left:0;min-width:200px;display:grid;gap:4px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.dd-note{font-size:12px;color:var(--ink-3);margin-top:4px}
+.bar-toggle{cursor:pointer}
+.ad-row{cursor:pointer;border-radius:5px}
+.ad-row:hover,.ad-row:focus-visible{background:var(--chip)}
+.ad-row .pname::before{content:'›';display:inline-block;width:1em;color:var(--ink-3);transition:transform .12s}
+.ad-row[aria-expanded="true"] .pname::before{transform:rotate(90deg)}
+.ad-list{max-height:520px;overflow-y:auto}
+.bar-toggle .name::before{content:'›';display:inline-block;width:1em;color:var(--ink-3);transition:transform .12s}
+.bar-toggle[aria-expanded="true"] .name::before{transform:rotate(90deg)}
+.ci-detail{margin:0 4px 6px 1.4em;padding:8px 12px;border-left:2px solid var(--rule);max-height:260px;overflow-y:auto;font-size:13px}
+.ci-detail ul{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.ci-detail li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:baseline}
+.ci-detail .pn{font-family:var(--mono);overflow-wrap:anywhere}
+.ci-detail .pm{color:var(--ink-3);font-size:12px;text-align:right}
+.ci-detail .pm b{font-weight:600;color:var(--good-ink)}
+.tags{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:5px}
+.tags span{font:500 11px/1.6 var(--mono);padding:0 7px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-2)}
+.tags span.on{border-color:transparent;background:var(--chip);color:var(--covered-ink)}
+/* lists */
+.plist{display:grid;gap:0;font-size:14px}
+.plist .row{display:grid;grid-template-columns:1fr auto;gap:12px;padding:8px 0;border-top:1px solid var(--rule);align-items:center}
+.plist .row:first-child{border-top:0}
+.pname{font-weight:600}
+.pmeta{font-size:13px;color:var(--ink-3)}
+.pill{font:500 12px var(--mono);padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--covered-ink);white-space:nowrap}
+.mini{height:6px;background:var(--track);border-radius:3px;overflow:hidden;margin-top:5px;max-width:220px}
+.mini i{display:block;height:100%;background:var(--covered)}
+/* table */
+.tablebar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px}
+.tablebar input[type=search]{flex:1 1 260px}
+.tscroll{overflow-x:auto;border:1px solid var(--rule);border-radius:10px;background:var(--panel);max-height:560px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:760px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{position:sticky;top:0;background:var(--panel);font:500 12px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);z-index:1}
+td.mono{font-family:var(--mono);font-size:13px}
+.yes{color:var(--covered-ink);font-weight:600}
+.dim{color:var(--ink-3)}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--ground);font-size:13px;line-height:1.4;padding:8px 10px;border-radius:6px;max-width:280px;z-index:20;opacity:0;transition:opacity .08s}
+.tip b{font-weight:600}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink-3);display:grid;gap:6px;max-width:90ch}
+@media (max-width:760px){.headline{grid-template-columns:1fr}.filters{position:static}.bar{grid-template-columns:minmax(80px,40%) 1fr auto}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">Eclipse Foundation · Security team · data as of __AS_OF__</span>
+    <h1>SBOM adoption across Eclipse Projects</h1>
+    <p class="scope" role="note"><span class="scope-tag">Scope</span><span><b>GitHub-hosted projects only.</b> All figures cover the __PROJECT_COUNT__ Regular and Incubating Eclipse projects with repositories on GitHub. Projects hosted only on GitLab, Gerrit or elsewhere, and archived projects, are not included.</span></p>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <label for="f-tl">Top-level project
+      <select id="f-tl"><option value="">All top-level projects</option></select>
+    </label>
+    <label class="check" for="f-active"><input type="checkbox" id="f-active"> Active in the last 6 months only</label>
+    <label class="check" for="f-active12"><input type="checkbox" id="f-active12"> Active in the last 12 months only</label>
+    <span class="count num" id="f-count"></span>
+  </div>
+
+  <div class="headline">
+    <div>
+      <div class="hero-num num" id="h-pct">–</div>
+      <div class="meter" aria-hidden="true"><i id="h-meter"></i></div>
+      <p class="hero-cap" id="h-cap">of projects have at least one SBOM in Dependency-Track</p>
+      <div class="hero-2">
+        <div class="hero-num2 num" id="h2-pct">–</div>
+        <div class="meter meter-sm" aria-hidden="true"><i id="h2-meter"></i></div>
+        <p class="hero-cap" id="h2-cap">of products have an SBOM in Dependency-Track</p>
+      </div>
+    </div>
+    <div class="kpi" role="table" aria-label="Projects and products in scope, active and with SBOMs">
+      <div class="kpi-row kpi-head" role="row"><span role="columnheader"></span><span role="columnheader">Projects</span><span aria-hidden="true"></span><span role="columnheader">Products</span></div>
+      <div class="kpi-row" role="row">
+        <span class="kpi-label" role="rowheader">In scope<small>GitHub-hosted, Regular and Incubating</small></span>
+        <span class="kpi-v num" role="cell" id="s-proj-all">–</span><span class="kpi-arrow" aria-hidden="true">→</span><span class="kpi-v num" role="cell" id="s-prod-all">–</span>
+      </div>
+      <div class="kpi-row" role="row" id="kpi-active" hidden>
+        <span class="kpi-label" role="rowheader">Active<small id="kpi-act-of">pushed to in the last 6 months</small></span>
+        <span class="kpi-v num" role="cell" id="s-proj-act">–</span><span class="kpi-arrow" aria-hidden="true">→</span><span class="kpi-v num" role="cell" id="s-prod-act">–</span>
+      </div>
+      <div class="kpi-row kpi-sb" role="row">
+        <span class="kpi-label" role="rowheader">With SBOMs<small id="kpi-sb-of">in scope</small></span>
+        <span class="kpi-v num" role="cell" id="s-proj-sb">–</span><span class="kpi-arrow" aria-hidden="true">→</span><span class="kpi-v num" role="cell" id="s-prod-sb">–</span>
+      </div>
+    </div>
+  </div>
+
+  <section id="where">
+    <div class="sec-head">
+      <span class="eyebrow">Where we stand</span>
+      <h2>SBOM coverage by project</h2>
+      <p>How many products each project ships, what kind they are, and how many already have an SBOM in Dependency-Track.</p>
+    </div>
+    <div class="panel">
+      <h3>Coverage by project</h3>
+      <p class="sub">Projects sorted by number of products. Bar length is the product count, split by product type; the figure on the right is products with an SBOM out of the total.</p>
+      <div class="tablebar pp-filters" role="group" aria-label="Filters for this list (shared with the page filters)">
+        <input type="search" id="pp-q" placeholder="Search projects by name…" aria-label="Search projects by name">
+        <label for="pp-tl" class="sortl">Top-level project
+          <select id="pp-tl"><option value="">All top-level projects</option></select>
+        </label>
+        <label class="check" for="pp-active"><input type="checkbox" id="pp-active"> Active in the last 6 months only</label>
+        <label class="check" for="pp-active12"><input type="checkbox" id="pp-active12"> Active in the last 12 months only</label>
+      </div>
+      <div class="legend" id="pp-legend"></div>
+      <div class="pp-head" aria-hidden="true"><span>Project</span><span>Products by type</span><span>SBOMs</span></div>
+      <div class="pp-scroll" id="c-proj" tabindex="0" aria-label="Coverage by project, scrollable list"></div>
+      <p class="note" id="pp-note"></p>
+    </div>
+  </section>
+
+  <section id="tooling">
+    <div class="sec-head">
+      <span class="eyebrow">What to build tooling for</span>
+      <h2>Build ecosystems</h2>
+      <p>The ecosystem decides which SBOM generator a product needs. Supporting the top few ecosystems well covers most of the portfolio.</p>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Product ecosystem</h3>
+        <p class="sub">Inferred from the build files at the repository root. Container images are counted as their own ecosystem.</p>
+        <div class="bars" id="c-eco"></div>
+      </div>
+      <div class="panel">
+        <h3>Product ecosystem split</h3>
+        <p class="sub">The same counts as percentages of all products in the selection. The five smallest ecosystems are grouped as "All other".</p>
+        <div class="pie-wrap" id="c-pie"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ci">
+    <div class="sec-head">
+      <span class="eyebrow">Where generation can run</span>
+      <h2>CI platforms</h2>
+      <p>The CI platform decides where the SBOM generation step can live. The generated workflow targets GitHub Actions.</p>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head">
+          <h3 id="ci-title">CI platform of the product's repositories</h3>
+          <div class="seg" role="radiogroup" aria-label="Count by">
+            <label><input type="radio" name="ci-unit" id="ci-unit-products" value="products" checked><span>Products</span></label>
+            <label><input type="radio" name="ci-unit" id="ci-unit-projects" value="projects"><span>Projects</span></label>
+          </div>
+        </div>
+        <p class="sub" id="ci-sub">GitHub Actions workflows vs. Jenkinsfiles found in the product's repositories. The blue part has an SBOM.</p>
+        <div class="bars" id="c-ci"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="sec-head">
+      <span class="eyebrow">Where to start</span>
+      <h2>Early Adopters products coverage status</h2>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head">
+          <h3 id="ad-title">Part-way there</h3>
+          <div class="seg" role="radiogroup" aria-label="Adoption status">
+            <label><input type="radio" name="ad-status" id="ad-incomplete" value="incomplete" checked><span>Incomplete</span></label>
+            <label><input type="radio" name="ad-status" id="ad-complete" value="complete"><span>Complete</span></label>
+          </div>
+        </div>
+        <p class="sub" id="ad-sub">Projects with some products covered, closest to complete first. Click a project to see its products.</p>
+        <div class="plist ad-list" id="l-partial"></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:24px" id="easy">
+      <h3>Easy Candidates for New Adopters</h3>
+      <p class="sub">Projects with no SBOM yet, filtered by what makes SBOM generation easy to adopt. Every condition is on by default; untick one to widen the list. Priority rises with popular ecosystems (Maven, container images, npm, Python), GitHub Actions only, a clear release trigger and GitHub Releases.</p>
+      <div class="tablebar">
+        <input type="search" id="e-q" placeholder="Search projects, ecosystems…" aria-label="Search projects">
+        <details class="dd" id="e-eco-dd">
+          <summary>Ecosystems <span class="dd-count" id="e-eco-count">all</span></summary>
+          <div class="dd-menu" role="group" aria-label="Ecosystem filter">
+            <label class="check" for="e-eco-maven"><input type="checkbox" id="e-eco-maven" value="Maven"> Maven</label>
+            <label class="check" for="e-eco-npm"><input type="checkbox" id="e-eco-npm" value="npm / JS"> npm</label>
+            <label class="check" for="e-eco-python"><input type="checkbox" id="e-eco-python" value="Python"> Python</label>
+            <label class="check" for="e-eco-gradle"><input type="checkbox" id="e-eco-gradle" value="Gradle"> Gradle</label>
+            <p class="dd-note">None ticked shows all ecosystems.</p>
+          </div>
+        </details>
+        <label for="e-sort" class="sortl">Sort by
+          <select id="e-sort">
+            <option value="rank">Priority (best first)</option>
+            <option value="n-desc">Number of products (most first)</option>
+            <option value="n-asc">Number of products (fewest first)</option>
+            <option value="name">Project name</option>
+          </select>
+        </label>
+        <span class="num dim" id="e-count"></span>
+      </div>
+      <div class="tablebar e-conds" role="group" aria-label="Conditions">
+        <label class="check" for="e-c-active"><input type="checkbox" id="e-c-active" checked> Active in the last 6 months</label>
+        <label class="check" for="e-c-gha"><input type="checkbox" id="e-c-gha" checked> On GitHub Actions</label>
+        <label class="check" for="e-c-nocpp"><input type="checkbox" id="e-c-nocpp" checked> Exclude C/C++</label>
+        <label class="check" for="e-c-notycho"><input type="checkbox" id="e-c-notycho" checked> Exclude Tycho/p2</label>
+        <label class="check" for="e-c-releases"><input type="checkbox" id="e-c-releases" checked> GitHub Releases present</label>
+        <label class="check" for="e-c-trigger"><input type="checkbox" id="e-c-trigger" checked> Clear release trigger</label>
+      </div>
+      <div class="tscroll"><table class="etable">
+        <thead><tr><th>Project</th><th>Products</th><th>Ecosystems</th><th>Workflows</th><th>Release trigger</th><th>Signals</th></tr></thead>
+        <tbody id="e-body"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+
+  <footer>
+    <p><b>Sources.</b> Products: <span class="num">github-products.json</span>, produced by per-project analysis of __REPO_COUNT__ GitHub repositories (__PROJECT_COUNT__ Regular and Incubating projects with GitHub repos). SBOM status: Dependency-Track project export, matched by repository URL, purl and name.</p>
+    <p><b>Caveats.</b> Product identification is an unreviewed proposal. Ecosystem is inferred from root-level build files and marks the primary build only. "Active" means a push to any of the product's repositories in the 180 days before __AS_OF__. Container images count only once found in a public registry (__IMG_UNVERIFIED__ image products could not be checked automatically).</p>
+  </footer>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+const DATA = __DATA__;
+const $ = s => document.querySelector(s);
+const fmt = n => n.toLocaleString('en-US');
+const pct = (a,b) => b ? (100*a/b) : 0;
+const pctS = (a,b) => { const v = pct(a,b); return (v < 10 ? v.toFixed(1) : Math.round(v)) + '%'; };
+const plural = n => n===1 ? '' : 's';
+function ciLabel(gha, jen){
+  if(gha && jen) { return 'GitHub Actions + Jenkins'; }
+  if(gha) { return 'GitHub Actions'; }
+  return jen ? 'Jenkins only' : 'No CI found';
+}
+const TL_NAMES = {technology:'Technology',iot:'IoT',automotive:'Automotive',dt:'Digital Twin',ee4j:'EE4J (Jakarta EE)',ecd:'Cloud Development',modeling:'Modeling',rt:'Runtime',adoptium:'Adoptium',tools:'Tools',polarsys:'PolarSys',locationtech:'LocationTech',openhw:'OpenHW',eclipse:'Eclipse Project',webtools:'Web Tools',science:'Science',oniro:'Oniro','?':'Unknown'};
+const tlName = t => TL_NAMES[t] || t;
+
+// populate top-level filter
+const tls = [...new Set(DATA.products.map(r=>r.tl))].sort((a,b)=>tlName(a).localeCompare(tlName(b)));
+$('#f-tl').insertAdjacentHTML('beforeend', tls.map(t=>`<option value="${t}">${tlName(t)}</option>`).join(''));
+$('#pp-tl').insertAdjacentHTML('beforeend', tls.map(t=>`<option value="${t}">${tlName(t)}</option>`).join(''));
+
+const tip = $('#tip');
+function showTip(e, html){ tip.innerHTML = html; tip.style.opacity = 1; moveTip(e); }
+function moveTip(e){
+  const r = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : null;
+  const x = e.clientX ?? (r ? r.left + r.width/2 : 0), y = e.clientY ?? (r ? r.top : 0);
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 14)) + 'px';
+  tip.style.top = Math.max(8, y - h - 12) + 'px';
+}
+function hideTip(){ tip.style.opacity = 0; }
+function bindTips(root){
+  root.querySelectorAll('[data-tip]').forEach(el=>{
+    const h = el.dataset.tip;
+    el.addEventListener('mouseenter', e=>showTip(e,h));
+    el.addEventListener('mousemove', moveTip);
+    el.addEventListener('mouseleave', hideTip);
+    el.addEventListener('focus', e=>showTip(e,h));
+    el.addEventListener('blur', hideTip);
+  });
+}
+
+function barRows(el, groups, total, opts={}){
+  const max = Math.max(1, ...groups.map(g=>g.n));
+  el.innerHTML = groups.map(g=>{
+    const w = 100*g.n/max, c = g.n ? 100*g.sb/g.n : 0;
+    const unit = opts.unit || 'products', sbUnit = opts.sbLabel || 'with SBOM';
+    const t = `<b>${g.label}</b><br>${fmt(g.n)} ${unit} · ${pctS(g.n,total)} of total<br>${fmt(g.sb)} ${sbUnit} (${pctS(g.sb,g.n)})` + (g.extra||'');
+    const val = opts.valFn ? opts.valFn(g) : fmt(g.sb) + '/' + fmt(g.n);
+    return `<div class="bar" tabindex="0" data-tip="${t.replaceAll('"','&quot;')}">
+      <span class="name">${g.label}</span>
+      <span class="track" style="width:${Math.max(w,1.5)}%"><span class="fill" style="width:${c}%"></span></span>
+      <span class="val">${val}</span></div>`;
+  }).join('') || '<p class="dim">No products match these filters.</p>';
+  bindTips(el);
+}
+function group(rows, key, labelFn){
+  const m = new Map();
+  rows.forEach(r=>{ const k = key(r); const g = m.get(k) || {key:k,label:labelFn?labelFn(k):k,n:0,sb:0,act:0}; g.n++; g.sb += r.sb?1:0; g.act += r.act?1:0; m.set(k,g); });
+  return [...m.values()].sort((a,b)=>b.n-a.n || a.label.localeCompare(b.label));
+}
+
+const PIE_SLOTS = ['Container image','Maven','Maven / Tycho (p2)','npm / JS','Python','Gradle','C / C++'];
+function pie(el, rows){
+  const total = rows.length;
+  const counts = new Map(PIE_SLOTS.map(k=>[k,0])); let other = 0; const otherParts = new Map();
+  rows.forEach(r=>{ if(counts.has(r.eco)) counts.set(r.eco, counts.get(r.eco)+1); else { other++; otherParts.set(r.eco,(otherParts.get(r.eco)||0)+1); } });
+  const slices = PIE_SLOTS.map((k,i)=>({label:k, n:counts.get(k), color:`var(--s${i+1})`})).filter(s=>s.n>0).sort((a,b)=>b.n-a.n);
+  if(other) slices.push({label:'All other', n:other, color:'var(--s-other)', detail:[...otherParts].sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${fmt(v)}`).join(', ')});
+  if(!total){ el.innerHTML = '<p class="dim">No products match these filters.</p>'; return; }
+  const R = 100, C = 110; let a0 = -Math.PI/2; let svg = `<svg viewBox="0 0 220 220" role="img" aria-label="Share of products by ecosystem">`;
+  const pctTxt = n => { const v = 100*n/total; return (v < 10 ? v.toFixed(1) : Math.round(v)) + '%'; };
+  slices.forEach(s=>{
+    const tip = `<b>${s.label}</b><br>${fmt(s.n)} products · ${pctTxt(s.n)} of the selection` + (s.detail ? `<br>${s.detail}` : '');
+    const frac = s.n/total, a1 = a0 + frac*2*Math.PI;
+    let d;
+    if(frac >= 0.9999) d = `M${C-R},${C} a${R},${R} 0 1,0 ${2*R},0 a${R},${R} 0 1,0 ${-2*R},0`;
+    else { const x0=C+R*Math.cos(a0), y0=C+R*Math.sin(a0), x1=C+R*Math.cos(a1), y1=C+R*Math.sin(a1);
+      d = `M${C},${C} L${x0.toFixed(2)},${y0.toFixed(2)} A${R},${R} 0 ${frac>0.5?1:0},1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`; }
+    svg += `<path d="${d}" fill="${s.color}" stroke="var(--panel)" stroke-width="2" stroke-linejoin="round" tabindex="0" data-tip="${tip.replaceAll('"','&quot;')}"/>`;
+    s.tip = tip; a0 = a1;
+  });
+  svg += `</svg>`;
+  const legend = `<div class="pie-legend">` + slices.map(s=>`<div class="li" tabindex="0" data-tip="${s.tip.replaceAll('"','&quot;')}"><i class="sw" style="background:${s.color}"></i><span>${s.label}</span><span class="pct">${pctTxt(s.n)}</span><span class="cnt">${fmt(s.n)}</span></div>`).join('') + `</div>`;
+  el.innerHTML = svg + legend; bindTips(el);
+}
+
+function projectBars(el, rows){
+  const slotOf = eco => { const i = PIE_SLOTS.indexOf(eco); return i >= 0 ? i : PIE_SLOTS.length; };
+  const colors = [...PIE_SLOTS.map((_,i)=>`var(--s${i+1})`), 'var(--s-other)'];
+  const names = [...PIE_SLOTS, 'All other'];
+  const m = new Map();
+  rows.forEach(r=>{ const g = m.get(r.p) || {p:r.p, n:0, sb:0, items:[], seg:names.map(()=>({n:0,sb:0,ecos:new Map()}))}; const s = g.seg[slotOf(r.eco)];
+    g.items.push(r); g.n++; g.sb += r.sb?1:0; s.n++; s.sb += r.sb?1:0; s.ecos.set(r.eco,(s.ecos.get(r.eco)||0)+1); m.set(r.p,g); });
+  const q = $('#pp-q').value.trim().toLowerCase();
+  const list = [...m.values()].filter(g => !q || g.p.toLowerCase().includes(q)).sort((a,b)=>b.n-a.n || a.p.localeCompare(b.p));
+  const max = Math.max(1, ...list.map(g=>g.n));
+  const used = new Set(); list.forEach(g=>g.seg.forEach((s,i)=>{ if(s.n) used.add(i); }));
+  $('#pp-legend').innerHTML = names.map((nm,i)=> used.has(i) ? `<span><i class="sw" style="background:${colors[i]}"></i>${nm}</span>` : '').join('')
+    + (list.some(g=>g.sb) ? `<span><i class="sw good"></i>Has at least one SBOM</span>` : '');
+  const detail = g => {
+    const byEco = new Map(); g.items.forEach(r=>{ if(!byEco.has(r.eco)) { byEco.set(r.eco,[]); } byEco.get(r.eco).push(r); });
+    return [...byEco].sort((a,b)=>slotOf(a[0])-slotOf(b[0]) || b[1].length-a[1].length || a[0].localeCompare(b[0])).map(([eco,items])=>{
+      const cov = items.filter(r=>r.sb).length;
+      return `<div class="pp-group"><h4><i class="sw" style="background:${colors[slotOf(eco)]}"></i>${esc(eco)}<span class="gc">${items.length} product${items.length===1?'':'s'} · ${cov} with SBOM</span></h4><ul>`
+        + items.slice().sort((a,b)=>(b.sb-a.sb) || a.k.localeCompare(b.k)).map(r=>`<li><span class="pn">${esc(r.k)}</span><span class="pm">${r.sb?'<b>SBOM uploaded</b>':'no SBOM'} · ${esc(r.ci)} · ${esc(r.rel)}</span></li>`).join('')
+        + `</ul></div>`; }).join('');
+  };
+  el._detail = new Map(list.map((g,i)=>['pp'+i, g]));
+  el._render = detail;
+  el.innerHTML = list.map((g,i)=>{
+    const segs = g.seg.map((s,i)=>{ if(!s.n) return '';
+      const label = i < PIE_SLOTS.length ? names[i] : [...s.ecos].map(([k,v])=>`${k} ${v}`).join(', ');
+      const tip = `<b>${esc(g.p)}</b><br>${esc(label)}: ${fmt(s.n)} product${s.n===1?'':'s'}<br>${fmt(s.sb)} with SBOM`;
+      return `<i tabindex="0" style="background:${colors[i]};flex:0 0 calc(${(100*s.n/max).toFixed(3)}% - 2px)" data-tip="${tip.replaceAll('"','&quot;')}"></i>`; }).join('');
+    return `<div class="pp-row${g.sb?' has-sbom':''}" role="button" tabindex="0" aria-expanded="false" aria-controls="pp${i}" data-id="pp${i}"><span class="name" title="${esc(g.p)}">${esc(g.p)}</span><span class="pp-bar">${segs}</span><span class="pp-val${g.sb?' has':''}">${fmt(g.sb)}/${fmt(g.n)}</span></div><div class="pp-detail" id="pp${i}" hidden></div>`;
+  }).join('') || `<p class="dim">${q ? 'No project name matches this search.' : 'No products match these filters.'}</p>`;
+  $('#pp-note').textContent = list.length ? `${fmt(list.length)} projects · scroll for more. Click a project to list its products by type; hover a segment for its count.` : '';
+  bindTips(el);
+}
+
+function ciExpandable(el, groups, itemsFor){
+  el.querySelectorAll('.bar').forEach((bar, i)=>{
+    const g = groups[i], id = 'ci-d'+i;
+    bar.classList.add('bar-toggle'); bar.setAttribute('role','button'); bar.setAttribute('aria-expanded','false'); bar.setAttribute('aria-controls', id);
+    const box = document.createElement('div'); box.className = 'ci-detail'; box.id = id; box.hidden = true;
+    bar.after(box);
+    const toggle = ()=>{ const open = bar.getAttribute('aria-expanded')==='true';
+      if(!open && !box.dataset.filled){ const items = itemsFor(g.key); box.innerHTML = `<ul>${items.join('')}</ul>`; box.dataset.filled='1'; }
+      bar.setAttribute('aria-expanded', String(!open)); box.hidden = open; };
+    bar.addEventListener('click', toggle);
+    bar.addEventListener('keydown', ev=>{ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); toggle(); } });
+  });
+}
+
+function renderAdopters(rows){
+  const complete = $('#ad-complete').checked;
+  const byP = new Map(); rows.forEach(r=>{ if(!byP.has(r.p)) { byP.set(r.p, []); } byP.get(r.p).push(r); });
+  const list = [...byP].map(([p, items])=>({p, items, n:items.length, sb:items.filter(r=>r.sb).length}))
+    .filter(g => complete ? (g.sb>0 && g.sb===g.n) : (g.sb>0 && g.sb<g.n))
+    .sort(complete ? (a,b)=>b.n-a.n || a.p.localeCompare(b.p) : (a,b)=>(b.sb/b.n)-(a.sb/a.n) || b.sb-a.sb || a.p.localeCompare(b.p));
+  $('#ad-title').textContent = complete ? 'Fully covered' : 'Part-way there';
+  $('#ad-sub').textContent = (complete ? 'Projects where every product has an SBOM, largest first.' : 'Projects with some products covered, closest to complete first.') + ' Click a project to see its products.';
+  const el = $('#l-partial');
+  const empty = complete ? 'No project in this selection is fully covered yet.' : 'No project in this selection has partial coverage.';
+  el.innerHTML = list.length ? list.map((g,i)=>{
+    const left = g.n - g.sb;
+    const meta = complete ? `all ${g.n} product${plural(g.n)} covered` : `${fmt(left)} product${plural(left)} left`;
+    const prods = g.items.slice().sort((a,b)=>(b.sb-a.sb) || a.k.localeCompare(b.k))
+      .map(r=>`<li><span class="pn">${esc(r.k)}</span><span class="pm">${esc(r.eco)} · ${r.sb ? '<b>SBOM uploaded</b>' : 'no SBOM'}</span></li>`).join('');
+    return `<div class="row ad-row" role="button" tabindex="0" aria-expanded="false" aria-controls="ad${i}" data-id="ad${i}"><div><div class="pname">${esc(g.p)}</div><div class="pmeta">${meta}</div><div class="mini"><i style="width:${100*g.sb/g.n}%"></i></div></div><span class="pill num">${g.sb}/${g.n}</span></div>
+      <div class="ci-detail" id="ad${i}" hidden><ul>${prods}</ul></div>`;
+  }).join('') : `<p class="dim">${empty}</p>`;
+}
+$('#l-partial').addEventListener('click', ev=>{ const row = ev.target.closest('.ad-row'); if(row) toggleAd(row); });
+$('#l-partial').addEventListener('keydown', ev=>{ const row = ev.target.closest('.ad-row'); if(row && ev.target===row && (ev.key==='Enter'||ev.key===' ')){ ev.preventDefault(); toggleAd(row); } });
+function toggleAd(row){ const box = document.getElementById(row.dataset.id), open = row.getAttribute('aria-expanded')==='true'; row.setAttribute('aria-expanded', String(!open)); box.hidden = open; }
+
+
+function render(){
+  const st = '', tl = $('#f-tl').value, act = activeWindow() > 0;
+  const rows = DATA.products.filter(r => (!st || r.st===st) && (!tl || r.tl===tl) && (!act || r.act));
+  const projSet = new Set(rows.map(r=>r.p));
+  const n = rows.length;
+  $('#f-count').textContent = `${fmt(n)} products · ${fmt(projSet.size)} projects`;
+  // Headline: scope follows maturity/top-level filters only (not the "active only" toggle).
+  const base = DATA.products.filter(r => (!st || r.st===st) && (!tl || r.tl===tl));
+  const scopeProjects = DATA.projects.filter(p => (!st || p.st===st) && (!tl || p.tl===tl));
+  const allN = base.length, allSb = base.filter(r=>r.sb).length;
+  const actRows = base.filter(r=>r.act), actN = actRows.length, actSb = actRows.filter(r=>r.sb).length;
+  const actProjects = new Set(actRows.map(r=>r.p));
+  const sbProjects = new Set(actRows.filter(r=>r.sb).map(r=>r.p));
+  $('#s-proj-all').textContent = fmt(scopeProjects.length);
+  $('#s-prod-all').textContent = fmt(allN);
+  $('#s-proj-act').textContent = fmt(actProjects.size);
+  $('#s-prod-act').textContent = fmt(actN);
+  $('#kpi-active').hidden = !act;
+  $('#kpi-act-of').textContent = `pushed to in the last ${activeWindow()===365 ? '12' : '6'} months`;
+  $('#kpi-sb-of').textContent = act ? 'active, with at least one SBOM' : 'in scope, with at least one SBOM';
+  const allSbProjects = new Set(base.filter(r=>r.sb).map(r=>r.p));
+  $('#s-proj-sb').textContent = fmt(act ? sbProjects.size : allSbProjects.size);
+  $('#s-prod-sb').textContent = fmt(act ? actSb : allSb);
+  // Percentage bars follow the selection: all in scope, or active only when ticked.
+  const pSb = act ? sbProjects.size : allSbProjects.size, pN = act ? actProjects.size : scopeProjects.length;
+  const qSb = act ? actSb : allSb, qN = act ? actN : allN, which = act ? 'active ' : '';
+  $('#h-pct').innerHTML = pctS(pSb,pN).replace('%','<small>%</small>');
+  $('#h-meter').style.width = Math.max(pct(pSb,pN), 0.4) + '%';
+  $('#h-cap').innerHTML = `of ${which}projects have at least one SBOM in Dependency-Track: <b class="num">${fmt(pSb)}</b> of <span class="num">${fmt(pN)}</span>`;
+  $('#h2-pct').innerHTML = pctS(qSb,qN).replace('%','<small>%</small>');
+  $('#h2-meter').style.width = Math.max(pct(qSb,qN), 0.4) + '%';
+  $('#h2-cap').innerHTML = `of ${which}products have an SBOM in Dependency-Track: <b class="num">${fmt(qSb)}</b> of <span class="num">${fmt(qN)}</span>`;
+
+  syncMirror();
+  ppRows = rows;
+  projectBars($('#c-proj'), rows);
+  barRows($('#c-eco'), group(rows, r=>r.eco), n);
+  pie($('#c-pie'), rows);
+  const ciOrder = ['GitHub Actions','GitHub Actions + Jenkins','Jenkins only','No CI found'];
+  if($('#ci-unit-projects').checked){
+    // A project's CI is the union over its products' repositories.
+    const byP = new Map(); rows.forEach(r=>{ const x = byP.get(r.p) || {p:r.p, gha:false, jen:false, sb:false, n:0, nsb:0};
+      x.gha ||= r.ci==='GitHub Actions' || r.ci==='GitHub Actions + Jenkins'; x.jen ||= r.ci==='Jenkins only' || r.ci==='GitHub Actions + Jenkins'; x.sb ||= r.sb; x.n++; x.nsb += r.sb?1:0; byP.set(r.p, x); });
+    const projRows = [...byP.values()].map(x=>({...x, ci: ciLabel(x.gha, x.jen)}));
+    const ciP = group(projRows, r=>r.ci).sort((a,b)=>ciOrder.indexOf(a.key)-ciOrder.indexOf(b.key));
+    $('#ci-title').textContent = "CI platform of the project's repositories";
+    $('#ci-sub').textContent = "GitHub Actions workflows vs. Jenkinsfiles across all of a project's product repositories. The blue part has at least one SBOM.";
+    barRows($('#c-ci'), ciP, projRows.length, {unit:'projects', sbLabel:'with at least one SBOM', valFn:g=>`${fmt(g.n)} · ${pctS(g.n,projRows.length)}`});
+    ciExpandable($('#c-ci'), ciP, key => projRows.filter(x=>x.ci===key).sort((a,b)=>(b.sb-a.sb) || b.n-a.n || a.p.localeCompare(b.p))
+      .map(x=>`<li><span class="pn">${esc(x.p)}</span><span class="pm">${x.n} product${x.n===1?'':'s'} · ${x.nsb ? '<b>' + x.nsb + ' with SBOM</b>' : 'no SBOM'}</span></li>`));
+  } else {
+    const ciG = group(rows, r=>r.ci).sort((a,b)=>ciOrder.indexOf(a.key)-ciOrder.indexOf(b.key));
+    $('#ci-title').textContent = "CI platform of the product's repositories";
+    $('#ci-sub').textContent = "GitHub Actions workflows vs. Jenkinsfiles found in the product's repositories. The blue part has an SBOM.";
+    barRows($('#c-ci'), ciG, n, {valFn:g=>`${fmt(g.n)} · ${pctS(g.n,n)}`});
+    ciExpandable($('#c-ci'), ciG, key => rows.filter(r=>r.ci===key).sort((a,b)=>(b.sb-a.sb) || a.p.localeCompare(b.p) || a.k.localeCompare(b.k))
+      .map(r=>`<li><span class="pn">${esc(r.k)}</span><span class="pm">${esc(r.p)} · ${r.sb ? '<b>SBOM uploaded</b>' : 'no SBOM'}</span></li>`));
+  }
+
+  renderAdopters(rows);
+
+
+  renderEasy();
+
+}
+
+function renderEasy(){
+  const tl = $('#f-tl').value, q = $('#e-q').value.trim().toLowerCase(), sort = $('#e-sort').value;
+  const on = id => $(id).checked;
+  const ecoSel = ['#e-eco-maven','#e-eco-npm','#e-eco-python','#e-eco-gradle'].filter(on).map(id=>$(id).value);
+  $('#e-eco-count').textContent = ecoSel.length ? ecoSel.length + ' selected' : 'all';
+  const prodsOf = new Map(); DATA.products.forEach(r=>{ if(!prodsOf.has(r.p)) { prodsOf.set(r.p,[]); } prodsOf.get(r.p).push(r); });
+  let list = DATA.easy.filter(e => {
+    const pr = prodsOf.get(e.p) || [];
+    if(e.sb > 0) return false;                                         // new adopters: no SBOM yet
+    if(tl && e.tl !== tl) return false;
+    if(on('#e-c-active') && !pr.every(r => r.age != null && r.age <= 180)) return false;
+    if(on('#e-c-gha') && !pr.every(r => r.ci === 'GitHub Actions' || r.ci === 'GitHub Actions + Jenkins')) return false;
+    if(on('#e-c-nocpp') && e.eco.includes('C / C++')) return false;
+    if(on('#e-c-notycho') && e.eco.includes('Maven / Tycho (p2)')) return false;
+    if(on('#e-c-releases') && !e.releases) return false;
+    if(on('#e-c-trigger') && !e.rel_ok) return false;
+    if(ecoSel.length && !e.eco.some(x => ecoSel.includes(x))) return false;
+    return !q || (e.p+' '+e.eco.join(' ')+' '+e.release).toLowerCase().includes(q);
+  });
+  const prio = (a,b)=>b.score-a.score || a.wf-b.wf || a.n-b.n || a.p.localeCompare(b.p);
+  const cmp = {rank:prio, 'n-desc':(a,b)=>b.n-a.n || prio(a,b), 'n-asc':(a,b)=>a.n-b.n || prio(a,b), name:(a,b)=>a.p.localeCompare(b.p)}[sort];
+  list = list.slice().sort(cmp);
+  const eProducts = list.reduce((s,e)=>s+e.n, 0);
+  $('#e-count').textContent = `${fmt(list.length)} project${list.length===1?'':'s'} · ${fmt(eProducts)} product${eProducts===1?'':'s'}`;
+  const byP = new Map(); DATA.products.forEach(r=>{ if(!byP.has(r.p)) { byP.set(r.p,[]); } byP.get(r.p).push(r); });
+  const tagHtml = e => {
+    const tags = [['popular ecosystem',e.popular],['GitHub Actions only',e.gha_only],['release trigger',e.rel_ok],['GitHub Releases',e.releases]]
+      .map(([l,on])=>`<span class="${on?'on':''}">${l}</span>`).join('');
+    return `<div class="tags" style="margin-top:0">${tags}</div>`;
+  };
+  $('#e-body').innerHTML = list.map((e,i)=>{
+    const id = 'ep'+i;
+    const prods = (byP.get(e.p)||[]).map(r=>`<tr><td class="mono">${esc(r.k)}</td><td>${esc(r.eco)}</td><td>${esc(r.ci)}</td><td>${esc(r.rel)}</td><td>${r.sb?'<span class="yes">SBOM uploaded</span>':'<span class="dim">No SBOM</span>'}</td></tr>`).join('');
+    return `<tr><td><b>${esc(e.p)}</b><div class="pmeta">${esc(tlName(e.tl))} · ${esc(e.st)}</div></td>
+      <td><button type="button" class="ptoggle" aria-expanded="false" aria-controls="${id}" data-row="${id}"><span class="chev">›</span>${e.n} product${e.n===1?'':'s'}</button></td>
+      <td>${esc(e.eco.join(', '))}</td><td class="mono">${e.wf}</td><td>${esc(e.release)}</td><td>${tagHtml(e)}</td></tr>
+      <tr class="prow" id="${id}" hidden><td colspan="6"><table class="subt"><tbody>${prods}</tbody></table></td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="dim">No projects match. Clear the search, or untick a condition or ecosystem to widen the list.</td></tr>';
+}
+function togglePP(row){
+  const el = $('#c-proj'), box = document.getElementById(row.dataset.id), open = row.getAttribute('aria-expanded')==='true';
+  if(!open && !box.dataset.filled){ box.innerHTML = el._render(el._detail.get(row.dataset.id)); box.dataset.filled = '1'; }
+  row.setAttribute('aria-expanded', String(!open)); box.hidden = open;
+}
+$('#c-proj').addEventListener('click', ev=>{ const row = ev.target.closest('.pp-row'); if(row) togglePP(row); });
+$('#c-proj').addEventListener('keydown', ev=>{ const row = ev.target.closest('.pp-row'); if(row && ev.target===row && (ev.key==='Enter'||ev.key===' ')){ ev.preventDefault(); togglePP(row); } });
+$('#e-body').addEventListener('click', ev=>{
+  const btn = ev.target.closest('.ptoggle'); if(!btn) return;
+  const row = document.getElementById(btn.dataset.row); const open = btn.getAttribute('aria-expanded')==='true';
+  btn.setAttribute('aria-expanded', String(!open)); row.hidden = open;
+});
+['#e-sort','#e-c-active','#e-c-gha','#e-c-nocpp','#e-c-notycho','#e-c-releases','#e-c-trigger','#e-eco-maven','#e-eco-npm','#e-eco-python','#e-eco-gradle'].forEach(s=>$(s).addEventListener('change', renderEasy));
+$('#e-q').addEventListener('input', renderEasy);
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+let lastRows = null;
+// The two activity boxes are exclusive: ticking one clears the other.
+function activeWindow(){
+  if($('#f-active12').checked) { return 365; }
+  return $('#f-active').checked ? 180 : 0;
+}
+function applyActiveWindow(){ const days = activeWindow() || 180; DATA.products.forEach(r => { r.act = r.age != null && r.age <= days; }); }
+$('#f-active').addEventListener('change', ()=>{ if($('#f-active').checked) { $('#f-active12').checked = false; } applyActiveWindow(); render(); });
+$('#f-active12').addEventListener('change', ()=>{ if($('#f-active12').checked) { $('#f-active').checked = false; } applyActiveWindow(); render(); });
+['#f-tl','#ci-unit-products','#ci-unit-projects','#ad-incomplete','#ad-complete'].forEach(s=>$(s).addEventListener('change', render));
+// The Coverage by project panel carries a copy of the page filters; both stay in sync.
+const MIRROR = [['#pp-tl','#f-tl'],['#pp-active','#f-active'],['#pp-active12','#f-active12']];
+MIRROR.forEach(([local, page])=>$(local).addEventListener('change', ()=>{
+  const l = $(local), g = $(page);
+  if(l.type==='checkbox') g.checked = l.checked; else g.value = l.value;
+  g.dispatchEvent(new Event('change'));
+}));
+let ppRows = [];
+$('#pp-q').addEventListener('input', ()=>projectBars($('#c-proj'), ppRows));
+function syncMirror(){ MIRROR.forEach(([local, page])=>{ const l = $(local), g = $(page); if(l.type==='checkbox') l.checked = g.checked; else l.value = g.value; }); }
+render();
+</script>
