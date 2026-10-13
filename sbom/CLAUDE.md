@@ -99,9 +99,12 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
 
 Record the affected products and state the exclusion; never partially implement one.
 
-- **Upload to an SBOM registry** — output stops at a validated SBOM published as a
-  workflow artifact with a `TODO(upload)` marker.
-- **Jenkins and GitLab CI** — the assumed upload step needs a GitHub Actions OIDC token.
+- **Filing the upload-permission request** — every generated workflow uploads to
+  sbom.eclipse.org through PIA, and get-workflow drafts the HelpDesk ticket
+  (`project.upload_request`), but filing it is the maintainer's. The upload itself is never
+  tried from here: it first runs in the project's own GitHub Actions.
+- **Jenkins and GitLab CI** — only GitHub Actions workflows are generated. Jenkins can
+  upload through PIA too, but its pipelines are not generated.
 - **BSI enrichment** — the post-processing step supplying BSI fields 3, 6, 9, 10, 11 and
   12 read a sidecar that is no longer produced, so generated workflows top out at what the
   generator itself emits.

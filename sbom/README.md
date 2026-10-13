@@ -124,6 +124,18 @@ Nothing is written to disk for you to install and nothing is staged in a directo
 comment lists the secrets it needs, what a first run should produce, the coverage gaps
 recorded against it, and a `zizmor` line to audit it yourself before it runs.
 
+Each workflow **uploads its SBOM to the Eclipse SBOM registry**,
+[sbom.eclipse.org](https://sbom.eclipse.org), through the Project Identity Authority (PIA),
+with the [`upload-sbom`](https://github.com/eclipse-csi/workflows#upload-sbom) action. There
+is no secret to set up: PIA recognises the workflow by its GitHub identity. Upload
+permission is granted per product name, so the upload fails until it is granted.
+
+**A draft HelpDesk ticket requesting that permission**, printed at the end with a link that
+opens it pre-filled, and recorded in `report.json` under `project.upload_request`. It lists
+every product name the workflows upload under and the repository that runs each, as the
+[security handbook](https://eclipse-csi.github.io/security-handbook/sbom/howto.html#prerequisite-request-upload-permission) asks.
+Filing it is yours to do.
+
 ## What it will not do
 
 Deliberate exclusions. Each is recorded against the affected products rather than
@@ -131,13 +143,14 @@ half-implemented:
 
 - **Modify your repositories.** No commits, no branches, no pull requests, no local files
   staged.
-- **Upload to an SBOM registry.** Workflows publish the SBOM as a build artifact with a
-  `TODO(upload)` marker where the push belongs. Registry provisioning is a separate
-  configuration step, and guessing at it produces a workflow that fails undebuggably.
-- **Jenkins or GitLab CI.** The assumed upload step needs a GitHub Actions OIDC token.
-  Note that a product whose *release* runs on Jenkins can often still have a standalone
-  SBOM workflow on GitHub triggered by the same tag — the skills tell you when that is the
-  case, rather than writing the product off.
+- **File the upload-permission request.** The ticket is drafted and its link printed;
+  opening it is yours.
+- **Jenkins or GitLab CI.** Only GitHub Actions workflows are generated. Jenkins can upload
+  through PIA too — see the handbook's
+  [Jenkins section](https://eclipse-csi.github.io/security-handbook/sbom/howto.html#jenkins) —
+  but its pipelines are not generated here. Note that a product whose *release* runs on
+  Jenkins can often still have a standalone SBOM workflow on GitHub triggered by the same
+  tag — the skills tell you when that is the case, rather than writing the product off.
 - **BSI field enrichment.** Fields 3, 6, 9, 10, 11 and 12 are properties of *delivered
   files* — a shipped filename, the digest of the published artifact, whether a component is
   an executable or an archive — not of resolved coordinates. No dependency resolver
@@ -217,11 +230,12 @@ produces therefore:
 
 - Pins every action to a full commit SHA, resolved fresh at generation time — never copied
   from a reference file.
-- Declares `permissions: contents: read` at top level.
+- Declares `permissions: contents: read` at top level, and `id-token: write` only on the
+  job that uploads.
 - Sets `persist-credentials: false` on every checkout.
 - Never puts `${{ }}` inside a `run:` block.
 - Never uses `workflow_run`; it listens for the same event the release listens for.
-- Asserts the SBOM with `jq -e` before uploading it: spec version is exactly 1.6,
+- Asserts the SBOM with `jq -e` before uploading it to the registry: spec version is exactly 1.6,
   `components[]` and `dependencies[]` are non-empty, and no vulnerability data is present
   (BSI forbids it in an SBOM; VEX is a separate artifact).
 

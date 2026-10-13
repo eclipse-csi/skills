@@ -3,8 +3,9 @@ name: get-workflow
 description: >-
   For a product whose release mechanism is already recorded, choose the SBOM
   generator each of its build roots needs, then write a hardened GitHub Actions
-  workflow that produces a CycloneDX 1.6 SBOM on every release. Records the
-  workflow inline in ./report.json and prints it with the path it belongs at;
+  workflow that produces a CycloneDX 1.6 SBOM on every release and uploads it to
+  the Eclipse SBOM registry, plus a draft HelpDesk ticket requesting upload
+  permission. Records both in ./report.json and prints them;
   writes no workflow file, never modifies a project repository and never opens a
   pull request. Takes a product name, or runs over every product in
   ./report.json. Use after get-metadata, or standalone when asked which SBOM
@@ -14,7 +15,7 @@ argument-hint: "[product-name] — or (none) to run over every product in ./repo
 
 # Generate the SBOM workflow
 
-Four things are returned for every product. Nothing else is in scope:
+Five things are returned. Nothing else is in scope:
 
 | # | Output | Scope |
 |---|---|---|
@@ -22,6 +23,7 @@ Four things are returned for every product. Nothing else is in scope:
 | 2 | **A hardened workflow** — CycloneDX 1.6, gated, fully pinned. Recorded in `pipeline.workflow` and printed in the reply, with the path it belongs at | product |
 | 3 | **`generator` and `pipeline` in `./report.json`** | product |
 | 4 | **The coverage-gap register** — what will not be covered, and why | project |
+| 5 | **The upload-permission request** — a draft HelpDesk ticket and a link that opens it pre-filled (§12) | project |
 
 **This skill writes exactly one file: `./report.json`.** The workflow it generates is not
 written to disk anywhere — it goes inline into `pipeline.workflow.content`, and into your
@@ -34,10 +36,15 @@ or take any further action with it**. Generating it and showing it is the whole 
 maintainer reads it in your reply and copies it in themselves — the design rests on a
 human reviewing one new file before it runs in their repo.
 
-**Upload to an SBOM registry is out of scope.** Output stops at a validated SBOM published
-as a workflow artifact, with a `TODO(upload)` marker where the push would go. Registry
-provisioning is a separate configuration step and guessing at it produces a workflow that
-fails in a way nobody can debug.
+**Every generated workflow uploads its SBOM to the Eclipse SBOM registry**
+(sbom.eclipse.org) through the Project Identity Authority (PIA), with the
+`eclipse-csi/workflows/upload-sbom` action — see
+[`hardening.md`](references/hardening.md) "Upload through PIA". PIA authenticates the
+workflow by its own GitHub OIDC identity, so there is no secret to set up, but upload
+permission is granted **per product name and repository** by the Eclipse Foundation
+Security Team. §12 drafts the HelpDesk ticket that requests it. Until it is granted, the
+upload step fails, visibly. The upload cannot be tried from here: it first runs in the
+project's own GitHub Actions, once a maintainer has added the workflow.
 
 ## Input
 
@@ -77,6 +84,19 @@ Set `pipeline.status` to `blocked` and put the specific question in the product'
 at a cost — they stopped and asked rather than guessing. Treating them as advisory throws
 that away.
 
+### A pipeline that already emits an SBOM
+
+When a release pipeline's `emits_sbom` (recorded by `/get-metadata`) shows it already
+produces a CycloneDX 1.6 SBOM, leave it alone: `status: already-conformant`, no workflow.
+Replacing working SBOM generation is the maintainer's decision.
+
+If that pipeline still uploads through the deprecated `store-sbom-data` workflow
+(`emits_sbom.upload` is `store-sbom-data`), record it in `pipeline.deprecated_upload` and
+say so in your report: the handbook asks projects to
+[migrate to the PIA upload](https://eclipse-csi.github.io/security-handbook/sbom/howto.html#deprecated-upload-via-store-sbom-data).
+Do not generate a migration and do not add the product to the upload-permission request;
+migrating is the maintainer's call.
+
 ## 2. Choose a generator
 
 Three gates, in order. The routing authority is
@@ -88,9 +108,11 @@ in `pipeline.tool_selection_revision`.
 ### Gate A — is this in scope at all? (product scope)
 
 Out of scope **only** when `hook.strategy` is `extend-existing` **and** the pipeline named
-in `hook.target` has `ci_system` other than `github-actions`. The upload step these
-workflows assume needs a GitHub Actions OIDC token, which Jenkins and GitLab CI do not
-have.
+in `hook.target` has `ci_system` other than `github-actions`. This skill generates GitHub
+Actions workflows only. Jenkins can upload through PIA too — the handbook's
+[Jenkins section](https://eclipse-csi.github.io/security-handbook/sbom/howto.html#jenkins)
+shows how — but generating Jenkins pipelines is not covered here, and the handbook
+documents no upload for GitLab CI.
 
 **"Releases from Jenkins" is not the same fact as "out of scope."** A product whose stable
 release runs on a Jenkins job can still have a standalone workflow triggered by the same
@@ -244,13 +266,55 @@ For a `manual` product, say plainly in both the workflow header comment and your
 **SBOM generation is not automatic for this product; it fires when someone remembers.**
 Record it as a coverage gap. A manual workflow that nobody runs is not onboarding.
 
+### Product version
+
+Every upload carries a version, set by a "Determine product version" step (the skeleton in
+[`hardening.md`](references/hardening.md)). Take it from what defines a release for this
+product, `release.versioning.defines_release`:
+
+| `defines_release` | `product-version` |
+|---|---|
+| `github-release` | `${{ inputs.ref \|\| github.event.release.tag_name }}`: the release tag, as published |
+| `git-tag` | `${{ inputs.ref \|\| github.ref_name }}`: the tag that was pushed |
+| `registry-version` | The tag, when `versioning` records that the registry version is the tag; otherwise as `manifest-version` |
+| `manifest-version` | Read from the manifest at the checked-out ref, after the toolchain is set up — e.g. `1.2.0-SNAPSHOT` |
+| `none-found` | No version to upload under: `status: needs-input`, with the question in `needs_review` |
+
+Reading a manifest version, one command per ecosystem, run inside the version step:
+
+| Ecosystem | Command |
+|---|---|
+| Maven, Maven/Tycho | `mvn -B -q -DforceStdout help:evaluate -Dexpression=project.version` |
+| npm, Yarn, pnpm | `node -p "require('./package.json').version"` |
+| Python | `python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])'` |
+| Rust | `cargo metadata --no-deps --format-version 1 \| jq -r '.packages[0].version'` |
+
+Anything else, or a manifest that computes its version at build time, is `needs-input`.
+Whichever source, the value is bound through `env:` or captured in a shell variable,
+shape-checked, and written to the step output; it never reaches `product-version`
+unchecked.
+
+### Upload names
+
+Upload permission is granted per name, so every document a workflow uploads has its own,
+written literally in the workflow:
+
+- **One document** — the product key.
+- **A matrix** — one name per entry, `<product>-<target>` (e.g. `foo-cli-linux-amd64`),
+  carried in the matrix entry as `upload-name`.
+- **`merge`** — only the merged document is uploaded, under the product key.
+- **`link`** — the primary document under the product key, each linked document under
+  `<product>-<source>`, where `<source>` is the source's repo name.
+
+Record them all in `pipeline.upload_names`; the §12 ticket lists exactly these. Names must
+be unique across the whole registry — Dependency-Track allows no two entries with the same
+name — which the `<short_id>-<component>` naming from `/list-products` is there to ensure.
+
 ### Matrixed build roots
 
-`build.matrix` becomes `strategy.matrix` with `fail-fast: false`, one SBOM per entry, and
-artifact names suffixed with the target — GitHub Actions rejects duplicate artifact names
-within a run. The four gates run per document, and a final job asserts the uploaded
-document count equals the number of matrix entries, so a skipped leg is visible rather
-than silently absent.
+`build.matrix` becomes `strategy.matrix` with `fail-fast: false`, one SBOM per entry, each
+uploaded under its own name (see "Upload names"). The four gates and the upload run per
+entry, so a failed entry shows as a failed job; there is no separate count job.
 
 Map `runs-on` from each target where a GitHub-hosted runner exists. Where none does — a
 macOS or Windows target built on self-hosted agents — **record it as a documented gap
@@ -262,8 +326,8 @@ Linux-resolved SBOM is a document describing something nobody shipped.
 | `hook.multi_source.strategy` | Build |
 |---|---|
 | `single` | One job. The other sources are build-time only |
-| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge` → **re-run all four gates on the merged document**. Upload the merged document *and* the per-source ones |
-| `link` | No merge job. Each document uploaded separately; the primary carries `externalReferences[]` of `type: bom` pointing at the others |
+| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge` → **re-run all four gates on the merged document**. Upload only the merged document, under the product key |
+| `link` | No merge job. Each document uploaded under its own name (see "Upload names"); the primary carries `externalReferences[]` of `type: bom` pointing at the others |
 
 **Re-running the gates after a merge is not belt-and-braces.** A merge can drop the
 dependency roots and turn two properly graphed inputs into one flat component list —
@@ -271,8 +335,8 @@ schema-valid, and exactly the failure the gate exists for.
 
 For `link`, say why it is only conditionally conformant: BSI TR-03183-2 permits linked
 SBOMs when each linked document is itself conformant *and* the referencing creator
-guarantees their availability. With upload out of scope, availability is precisely what is
-not yet guaranteed.
+guarantees their availability. Availability rests on every linked document being uploaded,
+so it holds only once upload permission is granted for each of their names.
 
 The workflow lives in `hook.multi_source.host_repo`. Name that choice in your report — for
 a multi-repo product it is a judgment call, not a default.
@@ -287,6 +351,9 @@ contains:
 - The insertion point identified by the **name of an existing step**, not a line number, so
   it survives the file changing before someone applies it.
 - `continue-on-error: true` unless `hook.blocks_release` is true.
+- The version and upload steps, and a note that the job they go into needs
+  `id-token: write` added to its `permissions:` (keeping what it already has). Without it
+  the upload cannot get its OIDC token.
 - A bolded warning that this edits the pipeline that ships their software, which is the
   higher-stakes change.
 
@@ -308,10 +375,10 @@ the rule-by-rule detail, the two justified suppressions, and the emit-time audit
 workflow you generate satisfies it in full. The rules, in brief — each one a finding class
 from the `zizmor` audit of the earlier prototypes:
 
-full-SHA action pins · top-level `permissions: contents: read` · `persist-credentials:
-false` on every checkout · no `${{ }}` inside `run:` · no `workflow_run` · `set -euo
-pipefail` · `jq -e` gates per document · `cache: false` on every `setup-*` · a
-`TODO(upload)` comment.
+full-SHA action pins · top-level `permissions: contents: read` · `id-token: write` on the
+uploading job only · `persist-credentials: false` on every checkout · no `${{ }}` inside
+`run:` · no `workflow_run` · `set -euo pipefail` · `jq -e` gates per document, before the
+upload · `cache: false` on every `setup-*`.
 
 Two standing preferences:
 
@@ -337,6 +404,14 @@ gh api repos/<owner>/<repo> --jq '.archived, .full_name'
 40 hex; write the `# <tag>` comment to match the tag you actually resolved. Check
 `archived` and `full_name` — repositories move (`CycloneDX/cdxgen` → `cdxgen/cdxgen`
 already happened), and a rename redirect resolves for a while and then stops.
+
+An action published **without releases or tags** — `eclipse-csi/workflows`, which holds
+`upload-sbom`, is one — is pinned to the commit its default branch points at, with the
+branch and the date in the comment:
+
+```sh
+sha=$(gh api repos/eclipse-csi/workflows/commits/main --jq .sha)   # → @<sha> # main (YYYY-MM-DD)
+```
 
 Pin non-actions the same way: generator versions, CLI versions, container images **by
 digest**.
@@ -379,14 +454,16 @@ resolver produces them and no choice of generator closes the gap.
 
 Stop here and present the plan, **before** generating any workflow:
 
-| Product | Generator | Assessment | Status | Install path | Gaps | Secrets |
-|---|---|---|---|---|---|---|
+| Product | Generator | Assessment | Status | Install path | Upload names | Gaps | Secrets |
+|---|---|---|---|---|---|---|---|
 
 Then ask:
 
 1. Is any product routed to the wrong tool?
 2. Are the recorded coverage gaps acceptable, or should a product be deferred?
 3. For multi-repo products — is the host repo right?
+4. Are the upload names right? Permission is granted per name, and a name is hard to
+   change once SBOMs have been uploaded under it.
 
 One table is a smaller ask than several hundred lines of YAML someone has to read to
 discover a product was routed wrong — and the last cheap place to catch it before a
@@ -410,9 +487,10 @@ The path is a label on the content, not a file that exists:
 - For `extend-existing`, the path is the **existing** workflow being edited, and the content
   is a step block rather than a whole file — see §4.
 - The workflow's own header comment carries what an install document would: every secret
-  that must exist and what each is for, expected first-run behaviour (artifact name and
-  document count), the recorded coverage gaps in plain language, why there is a
-  `TODO(upload)`, and a `zizmor` line the maintainer can run before installing. It travels
+  that must exist and what each is for, expected first-run behaviour (the upload names and
+  the version each run uploads), the recorded coverage gaps in plain language, that the
+  upload fails until permission for its names is granted and the ticket in §12 requests
+  it, and a `zizmor` line the maintainer can run before installing. It travels
   with the content, which is the point — a header comment cannot be separated from the
   workflow it describes the way a sibling `.md` can.
 
@@ -436,7 +514,7 @@ finding: regenerate, do not suppress.**
 
 ## 11. Record
 
-Two writes per product, plus one at project scope. Set `_meta.schema_version` to `1`, and
+Two writes per product, plus two at project scope. Set `_meta.schema_version` to `1`, and
 **never lower it** — a report already at a higher number stays there.
 
 1. `generator` — an array on the product entry. One entry per (source, tool) pair; ORT
@@ -447,12 +525,17 @@ Two writes per product, plus one at project scope. Set `_meta.schema_version` to
    `pipeline` key is one you never looked at, which is a different fact from one you
    declined.
 3. `project.coverage_gaps` — from §3.
+4. `project.upload_request` — written by the §12 script, never by hand.
 
 `pipeline.workflow` is where the generated YAML lives, and `report.json` is the only place
 it exists — `install_as` for the path it belongs at, `content` for the workflow verbatim,
 `kind` for whether it is a whole file or an `extend-existing` step block. Write the content
 **exactly as you printed it**; a report whose recorded workflow differs from the one the
 maintainer read is worse than no record, because both look authoritative.
+
+`pipeline.upload_names` lists every name the workflow uploads under (see "Upload names"),
+for every product whose workflow uploads. For an `already-conformant` product still on the
+deprecated `store-sbom-data` upload, `pipeline.deprecated_upload` says so (§1).
 
 Record `pipeline.tool_selection_revision` as the dated revision of `tool_selection.md` you
 routed from. The workflow is only justified by that revision: when the routing table is
@@ -463,14 +546,36 @@ later skill. Do not add a second one under `pipeline`. Use `high` only when you 
 every pin, ran the auditors, and observed every mandatory resolution input. Everything you
 could not observe belongs in `needs_review` as a specific question.
 
-Finish by validating:
+## 12. Request upload permission
+
+Upload permission is requested once per project, with an issue in the Eclipse Foundation
+[HelpDesk](https://gitlab.eclipse.org/eclipsefdn/helpdesk/-/issues), as the
+[handbook](https://eclipse-csi.github.io/security-handbook/sbom/howto.html#prerequisite-request-upload-permission)
+describes. Draft it with the script next to this skill. It reads `./report.json`, writes
+`project.upload_request`, and prints the draft ticket and a link that opens it pre-filled:
 
 ```sh
 # Substitute the quoted "Base directory for this skill" from your context; `python` if no `python3`.
+python3 "<skill base directory>/scripts/upload-request.py"
+```
+
+The ticket covers every product whose workflow uploads (`status` `generated`, `partial` or
+`patch-proposed`): its title names the project, and its body gives the project id and each
+upload name with the repository that runs the upload (`pipeline.host_repo`), and asks for
+the labels `service:dependencytrack` and `team:security`. **Do not write the ticket or the
+link by hand**: the script keeps both deterministic and the link correctly encoded. When the
+link would be too long for a browser, it opens the issue with the title only and the script
+says to paste the description.
+
+Do not file the ticket yourself. Filing it is the maintainer's to do.
+
+Finish by validating:
+
+```sh
 python3 "<skill base directory>/../validate-report.py"
 ```
 
-## 12. Report and stop
+## 13. Report and stop
 
 Print the workflow. For every product you generated one for, the reply contains the full
 YAML in a fenced block, headed by the path it belongs at — that reply is the only rendering
@@ -486,12 +591,17 @@ Flag explicitly:
   than "limited support".
 - **Every `manual` trigger** — SBOM generation is not automatic for that product.
 - **Every product needing secrets**, and that the workflow fails until they exist.
-- **Every matrixed product**, and how many documents it therefore produces.
+- **Every matrixed product**, and the upload names it therefore needs.
 - **Any target with no GitHub-hosted runner**, and that its platform is uncovered.
 - **Any auditor that was not installed**, and that the audit therefore did not run.
 - **No BSI enrichment** — uniform across every product, and the ceiling it imposes (§7).
 - **`project.coverage_gaps`** — which shipping repos still have no SBOM, and the skill to
   re-run for each.
+- **Every `already-conformant` product still on the deprecated `store-sbom-data` upload**,
+  and the handbook's migration note.
+
+End with the upload-permission request from §12: the draft ticket and the link, exactly as
+the script printed them, and say that every upload fails until the ticket is resolved.
 
 Then say which path each workflow belongs at, and **stop there**. Do not write it to a
 file, do not install it, do not offer to open a pull request, and do not propose a next
