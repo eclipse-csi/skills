@@ -4,8 +4,10 @@ description: >-
   Run the whole SBOM onboarding chain for a project, end to end — enumerate its
   repositories, identify the products it ships, determine how each is released,
   and generate a hardened GitHub Actions workflow that produces a CycloneDX 1.6
-  SBOM for every release. Stops at each confirmation point rather than deciding
-  for the maintainer, and resumes from whatever ./report.json already contains.
+  SBOM for every release and uploads it to the Eclipse SBOM registry, with a draft
+  HelpDesk ticket requesting upload permission. Stops at each confirmation point
+  rather than deciding for the maintainer, and resumes from whatever ./report.json
+  already contains.
   Use when someone wants to get a project onto automated SBOM generation and does
   not want to learn the individual steps.
 argument-hint: '"Eclipse <project name>", a PMI project ID, or a list of org/repo'
@@ -20,7 +22,7 @@ Runs four skills in order, each also usable on its own, sharing state through
 /list-repositories  → the project's code repositories
 /list-products      → the logical products it ships, and their ecosystems
 /get-metadata   → how each releases, and where SBOM generation attaches
-/get-workflow      → generator choice, and the generated workflow itself
+/get-workflow      → generator choice, the generated workflow, and the upload-permission request
 ```
 
 **Everything the chain writes goes in the current directory** — `report.json`, and
@@ -86,6 +88,9 @@ Summarise across the whole project, not per skill:
   at what its generator emits. Uniform across products, stated once.
 - **What was not verified** — anything an unavailable tool or a blocked network
   request left unchecked.
+- **The upload-permission request** — last, the draft HelpDesk ticket and the link that
+  opens it, exactly as `/get-workflow` printed them (`project.upload_request`). Every
+  upload fails until the ticket is resolved; filing it is the maintainer's to do.
 
 Then stop. **Report coverage honestly:** a project told it is onboarded when three of
 its eight products silently produce nothing is worse off than one handed an accurate

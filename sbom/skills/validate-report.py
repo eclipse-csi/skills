@@ -181,6 +181,75 @@ def _rule_pipeline_needs_release(report: dict[str, Any]) -> Iterator[str]:
                 )
 
 
+UPLOADING = {"generated", "partial", "patch-proposed"}
+
+
+def _uploads(report: dict[str, Any]) -> set[tuple[str, str, Any]]:
+    """(product, upload name, workload) for every name an uploading workflow uses."""
+    return {
+        (name, upload_name, (product.get("pipeline") or {}).get("host_repo"))
+        for name, product in (report.get("products") or {}).items()
+        if (product.get("pipeline") or {}).get("status") in UPLOADING
+        for upload_name in (product.get("pipeline") or {}).get("upload_names") or []
+    }
+
+
+def _rule_upload_names(report: dict[str, Any]) -> Iterator[str]:
+    """Upload names are unique, and each one is the name the workflow really uploads under.
+
+    Permission is granted per name, and the registry allows no two entries with the same
+    name, so a name shared by two products, or one the workflow never uses, requests
+    permission for the wrong thing.
+    """
+    owner: dict[str, str] = {}
+    for name, product in (report.get("products") or {}).items():
+        pipeline = product.get("pipeline") or {}
+        content = (pipeline.get("workflow") or {}).get("content") or ""
+        for upload_name in pipeline.get("upload_names") or []:
+            if upload_name in owner:
+                yield (
+                    f"products.{name}.pipeline.upload_names: {upload_name!r} is also an "
+                    f"upload name of {owner[upload_name]}. Each name must be unique."
+                )
+            owner[upload_name] = name
+            if content and upload_name not in content:
+                yield (
+                    f"products.{name}.pipeline.upload_names: {upload_name!r} does not "
+                    f"appear in the workflow, so it is not what the workflow uploads under."
+                )
+
+
+def _rule_upload_request(report: dict[str, Any]) -> Iterator[str]:
+    """`project.upload_request` lists exactly the names the workflows upload under.
+
+    It is written by get-workflow/scripts/upload-request.py. A ticket that misses a name
+    leaves that upload failing; one with a stale name requests permission nobody uses.
+    """
+    expected = _uploads(report)
+    request = (report.get("project") or {}).get("upload_request")
+    if not request:
+        if expected:
+            yield (
+                "project.upload_request is missing although workflows upload SBOMs; run "
+                "get-workflow/scripts/upload-request.py."
+            )
+        return
+    listed = {
+        (e.get("product"), e.get("upload_name"), e.get("workload"))
+        for e in request.get("products") or []
+    }
+    for product, upload_name, workload in sorted(expected - listed, key=str):
+        yield (
+            f"project.upload_request: {upload_name!r} ({product}, workload {workload!r}) "
+            f"is uploaded but not in the ticket; re-run upload-request.py."
+        )
+    for product, upload_name, workload in sorted(listed - expected, key=str):
+        yield (
+            f"project.upload_request: {upload_name!r} ({product}, workload {workload!r}) "
+            f"is in the ticket but no workflow uploads it; re-run upload-request.py."
+        )
+
+
 ERROR_RULES = (
     _rule_hook_immutable_input,
     _rule_fidelity_risk_null,
@@ -188,6 +257,8 @@ ERROR_RULES = (
     _rule_sources_in_repos,
     _rule_generator_targets_matrix,
     _rule_pipeline_needs_release,
+    _rule_upload_names,
+    _rule_upload_request,
 )
 
 WARNING_RULES = (_rule_shipping_repos_covered,)

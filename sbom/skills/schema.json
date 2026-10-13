@@ -35,7 +35,36 @@
           "description": "Shipping repositories with no path to an SBOM, and what would unblock each. Recorded here rather than invented as products: deciding a product exists is list-products' job.",
           "items": {"$ref": "#/$defs/coverage_gap"}
         },
-        "repos": {"$ref": "#/$defs/repos"}
+        "repos": {"$ref": "#/$defs/repos"},
+        "upload_request": {"$ref": "#/$defs/upload_request"}
+      },
+      "additionalProperties": false
+    },
+    "upload_request": {
+      "type": "object",
+      "description": "The draft Eclipse Foundation HelpDesk ticket requesting SBOM upload permission for every product whose workflow uploads. Written by get-workflow/scripts/upload-request.py, never by hand. Filing it is the maintainer's to do.",
+      "required": ["title", "description", "labels", "url", "url_includes_description", "products"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1, "description": "The ticket body, Markdown."},
+        "labels": {"type": "array", "items": {"type": "string"}, "description": "Labels the ticket asks for, in its text."},
+        "url": {"type": "string", "description": "Opens a new HelpDesk issue pre-filled with the title and, when it fits, the description."},
+        "url_includes_description": {"type": "boolean", "description": "false when the description was too long for the link and has to be pasted in."},
+        "products": {
+          "type": "array",
+          "minItems": 1,
+          "description": "One entry per upload name: exactly the pipeline.upload_names of every uploading product, each with its pipeline.host_repo as the workload.",
+          "items": {
+            "type": "object",
+            "required": ["product", "upload_name", "workload"],
+            "properties": {
+              "product": {"type": "string", "description": "Key under products."},
+              "upload_name": {"type": "string", "description": "The product-name the workflow uploads under."},
+              "workload": {"type": "string", "description": "org/repo of the GitHub repository that runs the upload."}
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -266,7 +295,11 @@
                   "present": {"type": "boolean"},
                   "format": {"type": "string", "description": "cyclonedx | spdx | other."},
                   "spec_version": {"type": "string"},
-                  "tool": {"type": "string"}
+                  "tool": {"type": "string"},
+                  "upload": {
+                    "enum": ["upload-sbom", "store-sbom-data", "other", "none"],
+                    "description": "How the SBOM leaves the pipeline: the PIA upload-sbom action, the deprecated store-sbom-data workflow, some other upload, or none (kept as an artifact, or not kept)."
+                  }
                 },
                 "additionalProperties": false
               }
@@ -427,11 +460,22 @@
             "no-path",
             "out-of-scope"
           ],
-          "description": "`generated` — a hardened workflow was emitted and every gate enforced. `partial` — emitted, but a routed generator carries a documented gap. `patch-proposed` — extend-existing, so `workflow` is a step block (`kind: patch`), not a whole file. `needs-input` — a mandatory resolution input or action pin could not be observed. `blocked` — refused: unconfirmed product boundary, low confidence, or a credential unavailable to GitHub Actions. `no-path` — no generator exists for this ecosystem. `already-conformant` — already emits a conformant SBOM and was left alone; a success, not a gap. `out-of-scope` — the hook target is not GitHub Actions, so no OIDC token."
+          "description": "`generated` — a hardened workflow was emitted and every gate enforced. `partial` — emitted, but a routed generator carries a documented gap. `patch-proposed` — extend-existing, so `workflow` is a step block (`kind: patch`), not a whole file. `needs-input` — a mandatory resolution input or action pin could not be observed. `blocked` — refused: unconfirmed product boundary, low confidence, or a credential unavailable to GitHub Actions. `no-path` — no generator exists for this ecosystem. `already-conformant` — already emits a conformant SBOM and was left alone; a success, not a gap. `out-of-scope` — the hook target is not GitHub Actions, and only GitHub Actions workflows are generated."
         },
         "host_repo": {
           "type": "string",
           "description": "org/repo the workflow is installed into. For a multi-repo product this is a judgment call carried over from release.hook.multi_source.host_repo."
+        },
+        "upload_names": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1},
+          "description": "Every product-name the workflow uploads under: the product key for one document, `<product>-<target>` per matrix entry, `<product>-<source>` per linked document. Upload permission is granted per name, so these are exactly what the HelpDesk ticket lists."
+        },
+        "deprecated_upload": {
+          "type": "string",
+          "description": "Only with already-conformant: the existing pipeline still uploads through the deprecated store-sbom-data workflow and should migrate to the PIA upload. Says so, with the handbook link."
         },
         "tool_selection_revision": {
           "type": "string",
@@ -453,7 +497,7 @@
             },
             "content": {
               "type": "string",
-              "description": "The workflow YAML verbatim, exactly as printed in the reply. Its header comment carries the secrets required, the recorded coverage gaps in plain language, the TODO(upload) explanation, and a zizmor line to run before installing.",
+              "description": "The workflow YAML verbatim, exactly as printed in the reply. Its header comment carries the secrets required, the recorded coverage gaps in plain language, the upload names and that the upload fails until permission is granted, and a zizmor line to run before installing.",
               "minLength": 1
             },
             "sha256": {
@@ -487,7 +531,21 @@
         {
           "$comment": "Generating a workflow means the provenance is recorded. There is no way to claim one was produced without carrying its content, the path it belongs at, and the routing revision it came from.",
           "if": {"properties": {"status": {"enum": ["generated", "partial"]}}, "required": ["status"]},
-          "then": {"required": ["workflow", "host_repo", "trigger", "tool_selection_revision"]}
+          "then": {"required": ["workflow", "host_repo", "trigger", "tool_selection_revision", "upload_names"]}
+        },
+        {
+          "$comment": "Every workflow uploads, and permission is granted per name and repository: a workflow without its upload names or the repository that runs it cannot be requested in the HelpDesk ticket.",
+          "if": {"properties": {"status": {"const": "patch-proposed"}}, "required": ["status"]},
+          "then": {"required": ["host_repo", "upload_names"]}
+        },
+        {
+          "$comment": "Only uploading workflows have upload names, and only a left-alone pipeline can carry the deprecated-upload note.",
+          "if": {"properties": {"status": {"not": {"enum": ["generated", "partial", "patch-proposed"]}}}, "required": ["status"]},
+          "then": {"not": {"required": ["upload_names"]}}
+        },
+        {
+          "if": {"properties": {"status": {"not": {"const": "already-conformant"}}}, "required": ["status"]},
+          "then": {"not": {"required": ["deprecated_upload"]}}
         },
         {
           "$comment": "Not generating is a positively asserted fact with a stated reason, never an omission. needs_review must name what a human has to resolve.",

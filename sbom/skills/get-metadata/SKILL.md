@@ -119,10 +119,15 @@ Record `ci_system` on each pipeline (`github-actions`, `jenkins`, `gitlab-ci`,
 Note any pipeline that already produces an SBOM. A product may be partly onboarded
 already, and replacing working SBOM generation is a decision for the maintainer,
 not a default. Record it as an object, not a flag — `{"present": true, "format":
-"cyclonedx", "spec_version": "1.4", "tool": "cargo-cyclonedx"}`. A bare `true`
-gives the builder nothing to reason with: an existing SBOM at the wrong spec
+"cyclonedx", "spec_version": "1.4", "tool": "cargo-cyclonedx", "upload": "none"}`. A bare
+`true` gives the builder nothing to reason with: an existing SBOM at the wrong spec
 version is a different situation from a conformant one. Use `{"present": false}`
 when there is none.
+
+`upload` says how that SBOM leaves the pipeline: `upload-sbom` (the
+`eclipse-csi/workflows/upload-sbom` action, through PIA), `store-sbom-data` (the deprecated
+`eclipse-csi/workflows/.github/workflows/store-sbom-data.yml`), `other`, or `none` (kept as
+an artifact, or not kept). `/get-workflow` flags the deprecated one.
 
 ## 3. How each build root resolves
 
