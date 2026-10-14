@@ -27,6 +27,7 @@ Exit status is 0 when the report passed in full, 1 otherwise (inverted under
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -250,6 +251,43 @@ def _rule_upload_request(report: dict[str, Any]) -> Iterator[str]:
         )
 
 
+WRITTEN_ACTIONS = {
+    "workflow": {"created", "replaced", "unchanged", "skipped"},
+    "patch": {"patched", "unchanged", "skipped"},
+}
+
+
+def _rule_written_action(report: dict[str, Any]) -> Iterator[str]:
+    """`workflow.written` records an action its kind can have.
+
+    A new workflow is created or replaced; a patch only ever patches the file it was made
+    from. Anything else means the record and the workflow it describes have drifted apart.
+    """
+    for name, product in (report.get("products") or {}).items():
+        workflow = (product.get("pipeline") or {}).get("workflow") or {}
+        action = (workflow.get("written") or {}).get("action")
+        allowed = WRITTEN_ACTIONS.get(workflow.get("kind"), set())
+        if action and action not in allowed:
+            yield (
+                f"products.{name}.pipeline.workflow.written: action {action!r} is not "
+                f"possible for kind {workflow.get('kind')!r}."
+            )
+
+
+def _rule_write_checkouts(report: dict[str, Any]) -> Iterator[str]:
+    """`write.checkouts` only names repositories a product's workflow is written to."""
+    hosts = {
+        ((product.get("pipeline") or {}).get("host_repo") or "").lower()
+        for product in (report.get("products") or {}).values()
+    }
+    for repo in ((report.get("write") or {}).get("checkouts") or {}):
+        if repo.lower() not in hosts:
+            yield (
+                f"write.checkouts: {repo!r} is no product's pipeline.host_repo, so no "
+                f"workflow is written to it."
+            )
+
+
 ERROR_RULES = (
     _rule_hook_immutable_input,
     _rule_fidelity_risk_null,
@@ -259,9 +297,30 @@ ERROR_RULES = (
     _rule_pipeline_needs_release,
     _rule_upload_names,
     _rule_upload_request,
+    _rule_written_action,
+    _rule_write_checkouts,
 )
 
-WARNING_RULES = (_rule_shipping_repos_covered,)
+
+def _rule_workflow_sha256(report: dict[str, Any]) -> Iterator[str]:
+    """`workflow.sha256` is the hash of the audited file, which is `content`.
+
+    A mismatch means the content was changed after get-workflow audited it, or recorded
+    differently from the file it audited. Warning-level: write-workflow still writes it
+    when asked, flagged as edited since the audit.
+    """
+    for name, product in (report.get("products") or {}).items():
+        workflow = (product.get("pipeline") or {}).get("workflow") or {}
+        recorded, content = workflow.get("sha256"), workflow.get("content")
+        if (recorded and isinstance(content, str)
+                and hashlib.sha256(content.encode("utf-8")).hexdigest() != recorded):
+            yield (
+                f"products.{name}.pipeline.workflow: content does not match its "
+                f"sha256, so it is not the workflow get-workflow audited."
+            )
+
+
+WARNING_RULES = (_rule_shipping_repos_covered, _rule_workflow_sha256)
 
 
 def validate(path: Path, schema: dict[str, Any] | None) -> tuple[list[str], list[str]]:

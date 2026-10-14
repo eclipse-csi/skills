@@ -345,5 +345,10 @@ actionlint "$scratch"
 
 High findings block. Medium and Low are reported, not blocking.
 
+**An `extend-existing` patch** is audited as the whole patched workflow, and the checks and
+auditors also run over the original it was made from (SKILL.md §10). Only a failure or a
+finding the original does not already have blocks; the rest is the maintainer's existing
+workflow, noted and left alone.
+
 **If an auditor is not installed, say so explicitly.** An audit that did
 not run must never be recorded as one that passed. Suggest `pipx install zizmor`.
