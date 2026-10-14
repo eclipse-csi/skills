@@ -17,6 +17,10 @@ carries only what is needed to *work on* the repo.
   `get-metadata` → `get-workflow` — plus `onboard`, which runs them in order.
   `list-repositories` is the only Eclipse-specific one of these; every other skill works
   from whatever repo or product list it is handed.
+- `write-workflow` writes the workflows recorded in `report.json` into local clones. It is
+  a separate step after the chain, run on its own or by `onboard --write`, and its script
+  (`skills/write-workflow/scripts/write-workflow.py`) does all the finding, diffing and
+  writing.
 - `get-coverage` runs product identification at scale over every Eclipse project on
   GitHub and builds the adoption dashboard. It does not use `report.json`; it writes its
   own files into the current directory (see its SKILL.md).
@@ -35,7 +39,7 @@ carries only what is needed to *work on* the repo.
 
 Every skill's output conforms to [`skills/schema.json`](skills/schema.json) and is written
 to `report.json` in the current directory, enriched stage by stage. All five onboarding
-skills validate before finishing:
+skills, and `write-workflow`, validate before finishing:
 
 ```sh
 python3 "<skill base directory>/../validate-report.py"
@@ -47,7 +51,7 @@ directory — which Claude Code states at the top of every skill invocation. Tha
 only locator that works in every install form (plugin, `.claude/skills`, a bare clone),
 because `CLAUDE_PLUGIN_ROOT` is set for MCP servers and hooks but **not** for the Bash
 tool. Moving either file into a skill directory, or the skills up a level, breaks all
-five call sites at once.
+six call sites at once.
 
 The script finds `schema.json` relative to itself, so the cwd never matters. Without
 `jsonschema` installed it reports `PARTIAL` and exits non-zero — the cross-field rules
@@ -83,8 +87,12 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
 - **Coverage gaps are reported, not papered over.** An SBOM omitting a significant portion
   of a product's dependencies is less useful than a documented gap.
 - **The onboarding chain writes exactly one file, `report.json`.** No workflow is staged
-  on disk, no project repository is modified, and no skill runs `git commit`, `git push`
-  or `gh pr create`.
+  on disk, and no skill runs `git commit`, `git push` or `gh pr create`.
+- **Only `write-workflow` writes into a project repository's clone**, and only the
+  workflow files recorded in `report.json`, verbatim, after the user agrees to its dry
+  run. Its script runs nothing in a clone, never overwrites a file without a second
+  confirmation, and writes a patch only over the exact file it was made from
+  (`base_sha256`).
 - **`get-coverage` writes only into the current working directory:** `github-repos.json`,
   `github-projects.json`, `github-repo-facts.json`, `github-products.json` (previous version
   kept as `github-products.previous.json`), `products-with-sboms.json`, `sbom-adoption.html`

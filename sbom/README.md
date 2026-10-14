@@ -5,7 +5,7 @@ Agent plugin that gets an open source project onto automated SBOM generation, so
 how far SBOM adoption has got across all Eclipse projects.
 
 You run them yourself, on your own project. Nothing is applied centrally, nothing is
-installed on your behalf, and no repository of yours is modified.
+installed on your behalf, and nothing is committed or pushed to any repository of yours.
 
 The infrastructure is rarely the hard part — for one already-understood project, the
 generator and the upload mechanics are well documented. What is missing is a repeatable
@@ -21,7 +21,8 @@ field-level requirement.
 > **We recommend running all these skills in a sandbox environment**, such as an isolated
 > container or virtual machine, rather than directly on your own machine. The skills run
 > scripts, call the GitHub and Dependency-Track APIs with your tokens, and let an agent run
-> commands on your behalf; a sandbox limits what they can reach.
+> commands on your behalf; a sandbox limits what they can reach. `/write-workflow` can only
+> write into clones the sandbox can see, so keep them in a folder shared with it.
 
 ### Onboarding skills
 
@@ -29,7 +30,7 @@ field-level requirement.
 |---|---|
 | Claude Code | The skills run inside it |
 | `gh`, authenticated (or a `GITHUB_TOKEN`) | Repository and release enumeration, and resolving action pins. The skills stop rather than produce a partial list, or a workflow pinned to a floating tag |
-| `python3` | Runs the report validator after every stage |
+| `python3` | Runs the report validator after every stage, and the scripts that draft the upload-permission ticket and write workflows into your clones |
 | `pip install jsonschema` | Without it the validator reports `PARTIAL` and exits non-zero rather than implying a pass |
 | `zizmor`, `actionlint` | Strongly recommended — every generated workflow is audited with them *before* you see it. Without them, the skills record that the audit **did not run** |
 
@@ -78,14 +79,21 @@ Restart Claude Code, and `/onboard` and `/get-coverage` are available.
 
 ## Quick start
 
-Run it from the directory you want `report.json` to land in. That is the only file the
-chain writes, and it always goes in the current directory:
+Run it from the directory you want `report.json` to land in. Apart from workflows written
+into your clones when you ask for it, that is the only file the chain writes, and it
+always goes in the current directory:
 
 ```
 /onboard Eclipse JKube
 ```
 
 Takes a project name, a PMI project ID such as `technology.csi`, or a list of `org/repo`.
+Add `--write` and a folder holding your clones to have the workflows written into them at
+the end, after a dry run you agree to:
+
+```
+/onboard Eclipse JKube --write ~/src
+```
 
 It works through four stages and **stops to ask at each decision point** — which
 repositories ship a product, whether a monorepo is one product or three, whether the
@@ -100,6 +108,7 @@ You can also run any stage on its own:
 | `/list-products` | The distinct products it ships, and their ecosystems |
 | `/get-metadata` | How each is versioned, released and built, and where SBOM generation should attach |
 | `/get-workflow` | Generator choice, and the generated workflow itself |
+| `/write-workflow [folder]` | The generated workflows, written into your local clones after a dry run you agree to |
 | `/get-coverage` | SBOM coverage across all Eclipse projects, as data files and a dashboard (see below) |
 
 Each onboarding stage enriches the `report.json` the last one left, and every stage is
@@ -119,10 +128,20 @@ verbatim under that product's `pipeline.workflow`.
 eclipse-jkube/jkube/.github/workflows/sbom-jkube.yml
 ```
 
-Nothing is written to disk for you to install and nothing is staged in a directory tree.
-**Copying a workflow into your repository is yours to do** — read it first. Its header
-comment lists the secrets it needs, what a first run should produce, the coverage gaps
-recorded against it, and a `zizmor` line to audit it yourself before it runs.
+Read it first. Its header comment lists the secrets it needs, what a first run should
+produce, the coverage gaps recorded against it, and a `zizmor` line to audit it yourself
+before it runs. Where SBOM generation has to go into your existing release workflow
+instead, you get the diff against that workflow.
+
+**The workflows written into your clones, if you ask for it** — with `/write-workflow`, or
+`--write` on `/onboard`. Point it at a clone, or at a folder holding clones one or two
+levels down; it finds each repository's clone by its git remotes. It first shows a dry run:
+which clone each workflow goes into and the full diff of every file it would create or
+change. Nothing is written until you agree, an existing file is replaced only after a
+second confirmation, and a change to your release workflow is written only over the exact
+version it was made from. A script does the finding, comparing and writing; it runs
+nothing in your clones and never commits. Reviewing, committing and opening the pull
+request are yours to do.
 
 Each workflow **uploads its SBOM to the Eclipse SBOM registry**,
 [sbom.eclipse.org](https://sbom.eclipse.org), through the Project Identity Authority (PIA),
@@ -141,8 +160,9 @@ Filing it is yours to do.
 Deliberate exclusions. Each is recorded against the affected products rather than
 half-implemented:
 
-- **Modify your repositories.** No commits, no branches, no pull requests, no local files
-  staged.
+- **Commit, branch, push or open pull requests.** Workflows reach your local clones only
+  through `/write-workflow`, after a dry run you agree to; nothing ever reaches GitHub
+  from here.
 - **File the upload-permission request.** The ticket is drafted and its link printed;
   opening it is yours.
 - **Jenkins or GitLab CI.** Only GitHub Actions workflows are generated. Jenkins can upload

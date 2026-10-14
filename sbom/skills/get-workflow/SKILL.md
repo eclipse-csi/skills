@@ -33,8 +33,10 @@ produced: no staging tree, no sidecar data file, no install document, no index.
 Beyond that: never write into a checkout of a project repository, never run `git add`,
 `commit` or `push`, never run `gh pr create`, and **do not offer to install the workflow
 or take any further action with it**. Generating it and showing it is the whole job. The
-maintainer reads it in your reply and copies it in themselves — the design rests on a
-human reviewing one new file before it runs in their repo.
+maintainer reads it in your reply and copies it in themselves, or has `/write-workflow`
+write it into a local clone after a dry run they agree to — a separate step, also run by
+`/onboard --write`, never this one. The design rests on a human reviewing the change
+before it runs in their repo.
 
 **Every generated workflow uploads its SBOM to the Eclipse SBOM registry**
 (sbom.eclipse.org) through the Project Identity Authority (PIA), with the
@@ -343,24 +345,53 @@ a multi-repo product it is a judgment call, not a default.
 
 ### `extend-existing`
 
-There is no standalone workflow to generate here, and no file to write. Record a step
-block instead, in the same `pipeline.workflow` field with `kind: patch`, and print it. It
-contains:
+There is no new workflow to generate here. Patch the existing one named by `hook.target`,
+and record the **whole patched file** in the same `pipeline.workflow` field, with
+`kind: patch`. A whole file, not a step block, is what makes the file a maintainer installs
+byte-for-byte the one you audited.
 
-- The exact step block to insert.
-- The insertion point identified by the **name of an existing step**, not a line number, so
-  it survives the file changing before someone applies it.
-- `continue-on-error: true` unless `hook.blocks_release` is true.
-- The version and upload steps, and a note that the job they go into needs
-  `id-token: write` added to its `permissions:` (keeping what it already has). Without it
-  the upload cannot get its OIDC token.
-- A bolded warning that this edits the pipeline that ships their software, which is the
-  higher-stakes change.
+1. Read the existing workflow as `/get-metadata` read it. Its entry in `release.pipelines`
+   — the one `hook.target` names — links to the exact version that was analysed:
+   `https://github.com/<org>/<repo>/blob/<sha>/<path>`. `<sha>` becomes `base_ref` and
+   `<path>` becomes `install_as`. Download that version into the temporary folder (§10):
 
-Set `workflow.install_as` to the **existing** workflow the block is inserted into, and say
-in your report that this is an edit to a file that already exists rather than a new file to
-drop in. A maintainer who copies a patch fragment in as a whole workflow gets something
-that does not run.
+   ```sh
+   gh api -H "Accept: application/vnd.github.raw" \
+     "repos/<org>/<repo>/contents/<path>?ref=<sha>" > "<tmp>/<product>.base.yml"
+   ```
+
+   If that link is not pinned to a 40-character commit, or points at another repository
+   than `pipeline.host_repo`, re-run `/get-metadata` for the product rather than reading
+   some other version: the patch must be made to the file whose release facts are recorded.
+
+2. Copy it to `<tmp>/<product>.yml` and edit only the copy, changing nothing else:
+   - Insert the version step, the SBOM generation, the four gates and the upload into the
+     job that builds the release, after the build steps the SBOM must describe. Open the
+     inserted block with a comment naming what it does and its upload names, and that the
+     upload fails until permission is granted. `continue-on-error: true` on the inserted
+     steps unless `hook.blocks_release` is true.
+   - Add `id-token: write` to that job's `permissions:`, keeping everything it already
+     has; without it the upload cannot get its OIDC token. A job with no `permissions:`
+     block gets one listing the workflow-level permissions plus `id-token: write`, because
+     a job-level block replaces the workflow-level one. When neither declares any, the job
+     runs with the repository's default token permissions, which the file does not show:
+     `status: needs-input`, asking which permissions the job needs.
+3. Audit the copy (§10). Record (§11) the copy verbatim as `content`, its hash as `sha256`,
+   the hash of `<product>.base.yml` as `base_sha256`, and the commit as `base_ref`:
+
+   ```sh
+   python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' <file>
+   ```
+
+4. Print the change as a diff, not the whole file —
+   `diff -u <product>.base.yml <product>.yml`, headed by the path and `base_ref` — with a
+   bolded warning that this edits the pipeline that ships their software, which is the
+   higher-stakes change.
+
+Set `workflow.install_as` to the existing workflow's path, and say in your report that this
+replaces a file that already exists. The recorded content stands in for that file only
+while it is still the version `base_sha256` names: `/write-workflow` refuses any other, and
+a maintainer applying it by hand should apply the diff, not copy the file over a newer one.
 
 If their existing workflow has hardening problems, **note them and stop there**. Fixing
 someone's release pipeline is not what they asked for, and a patch that also rewrites
@@ -485,7 +516,7 @@ The path is a label on the content, not a file that exists:
 - `partial` coverage appends `-partial` to the filename in that path, so the status stays
   visible in the repo's Actions list once installed, not only in a comment.
 - For `extend-existing`, the path is the **existing** workflow being edited, and the content
-  is a step block rather than a whole file — see §4.
+  is that whole workflow with the SBOM steps added — see §4.
 - The workflow's own header comment carries what an install document would: every secret
   that must exist and what each is for, expected first-run behaviour (the upload names and
   the version each run uploads), the recorded coverage gaps in plain language, that the
@@ -501,16 +532,35 @@ regenerate, not record.
 
 **Producing no file is not an exemption.** An unaudited workflow pasted out of a reply is
 exactly as installable as one staged in a tree, and the hardening contract is what makes
-it safe to install. The auditors read files, so write each workflow to a scratch file
-outside the working directory (the session scratchpad), audit it there, and delete it once
-the findings are recorded — that copy is how `zizmor` gets run, never output to hand over
-and never something to leave where it would look installable.
+it safe to install. The auditors read files, so audit a copy in a temporary folder of its
+own, outside the working directory and outside any clone. Create it with:
+
+```sh
+python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="sbom-"))'
+```
+
+It prints the folder's path, `<tmp>` below; write that path into each later command, since
+a shell variable may not survive from one command to the next. Write each workflow there,
+audit it, and delete the folder once the findings are recorded:
+
+```sh
+python3 -c 'import shutil, sys; shutil.rmtree(sys.argv[1])' "<tmp>"
+```
+
+That copy is how `zizmor` gets run, never output to hand over and never something to leave
+where it would look installable. If the folder cannot be created — a sandbox that allows
+writing only in the working directory — say so and stop; never put these files in the
+working directory or in a clone.
 
 Run the structural checks and the auditors from
 [`hardening.md`](references/hardening.md) §"Emit-time audit" over the scratch copy. A High
 finding blocks unless it is individually suppressed with a written justification, stated in
 your report — **exactly two** are justified, both set out there. **Anything else is a real
 finding: regenerate, do not suppress.**
+
+For a patch, run the same checks over the base file too. A failure or finding the base
+already has is the maintainer's existing problem — note it and do not fix it (§4); only
+what the patch introduces blocks.
 
 ## 11. Record
 
@@ -528,10 +578,14 @@ Two writes per product, plus two at project scope. Set `_meta.schema_version` to
 4. `project.upload_request` — written by the §12 script, never by hand.
 
 `pipeline.workflow` is where the generated YAML lives, and `report.json` is the only place
-it exists — `install_as` for the path it belongs at, `content` for the workflow verbatim,
-`kind` for whether it is a whole file or an `extend-existing` step block. Write the content
-**exactly as you printed it**; a report whose recorded workflow differs from the one the
-maintainer read is worse than no record, because both look authoritative.
+it exists — `install_as` for the path it belongs at, `content` for the complete file
+verbatim, `kind` for whether it is a new file or an `extend-existing` patch (with
+`base_sha256` and `base_ref`, §4), and `sha256`, the hash of the scratch file you audited.
+Write the content **exactly as you audited and printed it**; a report whose recorded
+workflow differs from the one the maintainer read is worse than no record, because both
+look authoritative. The validator warns when `content` does not match `sha256`: re-record
+the content from the audited file until it does not, or `/write-workflow` will flag it as
+edited since the audit.
 
 `pipeline.upload_names` lists every name the workflow uploads under (see "Upload names"),
 for every product whose workflow uploads. For an `already-conformant` product still on the
@@ -579,7 +633,8 @@ python3 "<skill base directory>/../validate-report.py"
 
 Print the workflow. For every product you generated one for, the reply contains the full
 YAML in a fenced block, headed by the path it belongs at — that reply is the only rendering
-of it a maintainer gets, so a truncated or elided one leaves them nothing to copy.
+of it a maintainer gets, so a truncated or elided one leaves them nothing to copy. For a
+patch, print the full diff from §4 instead.
 
 Alongside each, per product: generator and assessment, status, the trigger, and the
 coverage gaps in prose.

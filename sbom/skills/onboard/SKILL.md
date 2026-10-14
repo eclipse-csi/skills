@@ -5,12 +5,13 @@ description: >-
   repositories, identify the products it ships, determine how each is released,
   and generate a hardened GitHub Actions workflow that produces a CycloneDX 1.6
   SBOM for every release and uploads it to the Eclipse SBOM registry, with a draft
-  HelpDesk ticket requesting upload permission. Stops at each confirmation point
-  rather than deciding for the maintainer, and resumes from whatever ./report.json
-  already contains.
+  HelpDesk ticket requesting upload permission. With --write, finally writes the
+  workflows into local clones through write-workflow, after a dry run the user agrees
+  to. Stops at each confirmation point rather than deciding for the maintainer, and
+  resumes from whatever ./report.json already contains.
   Use when someone wants to get a project onto automated SBOM generation and does
   not want to learn the individual steps.
-argument-hint: '"Eclipse <project name>", a PMI project ID, or a list of org/repo'
+argument-hint: '"Eclipse <project name>", a PMI project ID, or a list of org/repo [--write [checkouts-folder]]'
 ---
 
 # Onboard a project onto automated SBOM generation
@@ -25,12 +26,15 @@ Runs four skills in order, each also usable on its own, sharing state through
 /get-workflow      → generator choice, the generated workflow, and the upload-permission request
 ```
 
+With `--write`, a fifth step follows: `/write-workflow` writes the generated workflows
+into local clones (see "With --write").
+
 **Everything the chain writes goes in the current directory** — `report.json`, and
 nothing else. Run it from wherever you want that file to land; do not create a
-working directory for it or write it anywhere but here. No workflow file is staged,
-no project repository is modified, no branch is pushed, no pull request is opened.
-Each generated workflow reaches the maintainer by being printed and recorded, and the
-chain proposes nothing further for it.
+working directory for it or write it anywhere but here. No workflow file is staged, no
+branch is pushed, no pull request is opened. Each generated workflow reaches the
+maintainer by being printed and recorded; only with `--write`, and only after the
+maintainer agrees to its dry run, does `/write-workflow` put it into a local clone.
 
 ## Resume, don't restart
 
@@ -43,7 +47,7 @@ is missing:
 | `project.repos` | `/list-products` |
 | `products` with `sources` | `/get-metadata` |
 | products with `release` | `/get-workflow` |
-| products with `pipeline` | Report what is there; ask what to re-run |
+| products with `pipeline` | Report what is there; ask what to re-run. With `--write`, go on to `/write-workflow` |
 
 Say which stage you are starting at and why. A maintainer who answered twenty
 questions yesterday should not answer them again because a session ended. Re-running
@@ -73,6 +77,17 @@ how many have release metadata, how many have workflows:
 python3 "<skill base directory>/../validate-report.py"
 ```
 
+## With --write
+
+Take `--write`, and the folder after it if there is one, out of the arguments; the rest
+is the project, as without it. The four stages run exactly as they do without it.
+
+Once `/get-workflow` has finished, run `/write-workflow`, following its SKILL.md, and pass
+it the folder — or none, and it asks for one. It checks the folder and the clones, shows
+the dry run and asks for the go-ahead itself; never answer its questions on the
+maintainer's behalf. A cancelled go-ahead or skipped products do not fail the run: report
+them, and that `/write-workflow` can be run again later.
+
 ## At the end
 
 Summarise across the whole project, not per skill:
@@ -88,9 +103,13 @@ Summarise across the whole project, not per skill:
   at what its generator emits. Uniform across products, stated once.
 - **What was not verified** — anything an unavailable tool or a blocked network
   request left unchecked.
+- **Written workflows** — with `--write`, what `/write-workflow` wrote and skipped, from
+  its result table. Without it, one line:
+  `To write these into local clones: /write-workflow <checkouts-folder>`.
 - **The upload-permission request** — last, the draft HelpDesk ticket and the link that
   opens it, exactly as `/get-workflow` printed them (`project.upload_request`). Every
-  upload fails until the ticket is resolved; filing it is the maintainer's to do.
+  upload fails until the ticket is resolved; filing it is the maintainer's to do. The
+  link is the very last line, after anything `/write-workflow` printed.
 
 Then stop. **Report coverage honestly:** a project told it is onboarded when three of
 its eight products silently produce nothing is worse off than one handed an accurate
