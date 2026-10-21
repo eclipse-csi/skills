@@ -75,8 +75,12 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
 
 - **CycloneDX 1.6, JSON, pinned explicitly.** 1.6 is a registry-compatibility floor, not a
   tooling ceiling: several generators now default to 1.7, and Trivy and osv-scalibr emit
-  1.7 with no selector flag at all. Every generated workflow pins the spec version *and*
-  asserts `jq -e '.specVersion == "1.6"'`. This has drifted before and will drift again.
+  1.7 with no selector flag at all. Every generated workflow pins the spec version
+  explicitly, once, as `CYCLONEDX_SPEC_VERSION` in its top-level `env:` block, beside an
+  exact `<TOOL>_VERSION` for each tool it installs; steps read the variables and never
+  write the numbers themselves. This has drifted before and will drift again, and the
+  workflow does not catch it: **the generated SBOM is not checked**, so its correctness
+  and completeness are not verified. The report says so.
 - **No vulnerability data in an SBOM** (BSI TR-03183-2). VEX is a separate artifact.
 - **Ecosystem-native generators over universal scanners** — native tools resolve the build
   graph and emit the dependency relationships BSI requires. Syft and cdxgen are for

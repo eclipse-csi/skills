@@ -128,9 +128,10 @@ verbatim under that product's `pipeline.workflow`.
 eclipse-jkube/jkube/.github/workflows/sbom-jkube.yml
 ```
 
-Read it first. Its header comment lists the secrets it needs, what a first run should
-produce, the coverage gaps recorded against it, and a `zizmor` line to audit it yourself
-before it runs. Where SBOM generation has to go into your existing release workflow
+Read it first. Its short header comment names the products it makes SBOMs for and where
+to find them in the Eclipse SBOM registry, plus one line for any secrets it needs or
+anything it does not cover. Just below, the CycloneDX version and every tool version sit
+together in one `env:` block, so they are easy to update. Where SBOM generation has to go into your existing release workflow
 instead, you get the diff against that workflow.
 
 **The workflows written into your clones, if you ask for it** — with `/write-workflow`, or
@@ -255,17 +256,19 @@ produces therefore:
 - Sets `persist-credentials: false` on every checkout.
 - Never puts `${{ }}` inside a `run:` block.
 - Never uses `workflow_run`; it listens for the same event the release listens for.
-- Asserts the SBOM with `jq -e` before uploading it to the registry: spec version is exactly 1.6,
-  `components[]` and `dependencies[]` are non-empty, and no vulnerability data is present
-  (BSI forbids it in an SBOM; VEX is a separate artifact).
+- Uploads the SBOM exactly as the generator wrote it. **Its correctness and completeness
+  are not checked**: nothing verifies the spec version, that components and dependencies
+  are listed, or that no vulnerability data is present (BSI forbids it in an SBOM; VEX is
+  a separate artifact).
 
 CycloneDX 1.6 is pinned explicitly because it is a registry-compatibility floor, not a
 tooling ceiling — several generators now default to 1.7, and two emit it with no selector
-flag at all.
+flag at all. It is set once per workflow, as `CYCLONEDX_SPEC_VERSION` at the top, next to
+the pinned version of each tool the workflow installs.
 
 Then the skills run `zizmor` and `actionlint` over their own output and require zero High
-findings before recording anything. Exactly two suppressions are permitted, both with
-written justifications. If those tools are not installed, the report says the audit **did
+findings before recording anything. Exactly one suppression is permitted, with a written
+justification: installing the SBOM generator itself. If those tools are not installed, the report says the audit **did
 not run** rather than claiming a pass.
 
 ## Working on the skills

@@ -115,10 +115,14 @@ one whose silent drift produces a document the registry rejects:
 
 | Control | Meaning |
 |---|---|
-| `native-1.6` | Emits 1.6 by default. Still assert it — defaults move |
+| `native-1.6` | Emits 1.6 by default. Still pin it explicitly — defaults move |
 | `flag` | Needs an explicit selector flag |
 | `output-suffix` | Encoded in the `-o` argument |
 | `convert-required` | Cannot emit 1.6 at all; a `cyclonedx-cli convert` step is mandatory |
+
+The invocations below show the spec version as `1.6` and leave tool versions out. In a
+generated workflow both come from its `env:` block: `$CYCLONEDX_SPEC_VERSION` and one
+`<TOOL>_VERSION` per tool ([`hardening.md`](hardening.md), "Versions in one place").
 
 | Ecosystem / condition | Tool | Score | Control | Non-negotiable invocation | Gap to record |
 |---|---|---:|---|---|---|
@@ -227,22 +231,18 @@ immediately.
 
 ## 5. Applies to every path
 
-Four checks, independent of the tool chosen. The first three are cheap guards against the failure
-modes that recur across every ecosystem.
+Rules for the generator invocation, independent of the tool chosen. The generated workflow
+does not check the SBOM it produces (`SKILL.md` §7), so these are the only guards against the
+failure modes that recur across every ecosystem.
 
-```bash
-jq -e '.specVersion == "1.6"'        bom.json   # spec drift: 6+ tools default above 1.6
-jq -e '(.dependencies | length) > 0' bom.json   # the most common failure: a flat component list
-jq -e 'has("vulnerabilities") | not' bom.json   # BSI-F2: Trivy and ORT are one flag from breaching
-jq -e '(.components | length) > 0'   bom.json
-```
-
-1. **Pin and assert the spec version.** Syft, cdxgen, `pnpm sbom`, cyclonedx-dotnet,
-   cyclonedx-ruby and SwiftPM all default **above** 1.6; Trivy and osv-scalibr emit 1.7 with no
-   selector. This will drift again.
-2. **Assert `dependencies[]` is non-empty.** Where a tool structurally cannot emit edges, emit a
-   `::warning::` and record the gap — do not fail silently.
-3. **Assert no vulnerability data.** Trivy always emits the key; ORT populates it if `advise` ran.
+1. **Pin the spec version explicitly**, through the workflow's `CYCLONEDX_SPEC_VERSION`.
+   Syft, cdxgen, `pnpm sbom`, cyclonedx-dotnet, cyclonedx-ruby and SwiftPM all default
+   **above** 1.6; Trivy and osv-scalibr emit 1.7 with no selector. This will drift again, and
+   nothing in the workflow will notice when it does.
+2. **Where a tool structurally cannot emit dependency edges, record the gap.** A flat component
+   list is the most common failure across ecosystems.
+3. **Generate no vulnerability data.** Trivy always emits the key; ORT populates it if `advise`
+   ran. VEX is a separate artifact.
 4. **Resolve with the inputs the release actually uses** — GOOS/GOARCH, `CARGO_BUILD_TARGET`,
    TFM/RID/Configuration, `includeConfigs`, `--only prod`, `--omit=dev`,
    `--without development:test`. An SBOM resolved for the wrong target describes something that

@@ -480,7 +480,7 @@
             "no-path",
             "out-of-scope"
           ],
-          "description": "`generated` — a hardened workflow was emitted and every gate enforced. `partial` — emitted, but a routed generator carries a documented gap. `patch-proposed` — extend-existing, so `workflow` is the existing workflow with the SBOM steps added (`kind: patch`), not a new file. `needs-input` — a mandatory resolution input or action pin could not be observed. `blocked` — refused: unconfirmed product boundary, low confidence, or a credential unavailable to GitHub Actions. `no-path` — no generator exists for this ecosystem. `already-conformant` — already emits a conformant SBOM and was left alone; a success, not a gap. `out-of-scope` — the hook target is not GitHub Actions, and only GitHub Actions workflows are generated."
+          "description": "`generated` — a hardened workflow was emitted. `partial` — emitted, but a routed generator carries a documented gap. `patch-proposed` — extend-existing, so `workflow` is the existing workflow with the SBOM steps added (`kind: patch`), not a new file. `needs-input` — a mandatory resolution input or action pin could not be observed. `blocked` — refused: unconfirmed product boundary, low confidence, or a credential unavailable to GitHub Actions. `no-path` — no generator exists for this ecosystem. `already-conformant` — already emits a conformant SBOM and was left alone; a success, not a gap. `out-of-scope` — the hook target is not GitHub Actions, and only GitHub Actions workflows are generated."
         },
         "host_repo": {
           "type": "string",
@@ -517,7 +517,7 @@
             },
             "content": {
               "type": "string",
-              "description": "The complete file, verbatim, exactly as audited. For `kind: workflow` it is also exactly what the reply printed; its header comment carries the secrets required, the recorded coverage gaps in plain language, the upload names and that the upload fails until permission is granted, and a zizmor line to run before installing. For `kind: patch` the reply prints the diff against the existing workflow instead.",
+              "description": "The complete file, verbatim, exactly as audited. For `kind: workflow` it is also exactly what the reply printed; its short header comment names the upload names, the plugin and where the SBOMs are uploaded, plus one line each, only when they apply, for what is not covered and the secrets required; its top-level env: block holds CYCLONEDX_SPEC_VERSION and every tool version. For `kind: patch` the reply prints the diff against the existing workflow instead.",
               "minLength": 1
             },
             "sha256": {

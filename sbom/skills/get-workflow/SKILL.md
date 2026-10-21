@@ -20,7 +20,7 @@ Five things are returned. Nothing else is in scope:
 | # | Output | Scope |
 |---|---|---|
 | 1 | **Generator choice** — which tool, and the rule that picked it | per source |
-| 2 | **A hardened workflow** — CycloneDX 1.6, gated, fully pinned. Recorded in `pipeline.workflow` and printed in the reply, with the path it belongs at | product |
+| 2 | **A hardened workflow** — CycloneDX 1.6, fully pinned. Recorded in `pipeline.workflow` and printed in the reply, with the path it belongs at | product |
 | 3 | **`generator` and `pipeline` in `./report.json`** | product |
 | 4 | **The coverage-gap register** — what will not be covered, and why | project |
 | 5 | **The upload-permission request** — a draft HelpDesk ticket and a link that opens it pre-filled (§12) | project |
@@ -192,12 +192,11 @@ graph* than the release did: `GOOS`/`GOARCH` for Go, TFM/RID/Configuration for .
 If `build.resolution_flags` and `build.toolchain` do not supply it, **do not fill it in
 from what the ecosystem usually needs.** Write the step with a `TODO(resolution)` marker
 in its `env:` block, set `status: needs-input`, and put the specific question in
-`needs_review`. The generated workflow would still run, still pass every gate, and still
-be wrong.
+`needs_review`. The generated workflow would still run, still upload, and still be wrong.
 
 **Credentials.** Each entry in `build.credentials_required` needed to *resolve*
 dependencies (not merely to publish) is wired into the job as `env:` from `secrets.*`,
-named in the generated workflow's header comment, and repeated in your report. If a
+named in the header's one-line "Needs secrets" note, and repeated in your report. If a
 required credential cannot exist in GitHub Actions — a Jenkins-managed SSH key, an
 on-prem-only token — set `status: blocked`.
 
@@ -210,13 +209,9 @@ Each `generator` entry records `assessment`:
 
 | `assessment` | What to do | `status` |
 |---|---|---|
-| `ok` | Generate the workflow. All four gates enforced as hard failures | `generated` |
-| `documented-gap`, something generable | Generate one, `install_as` naming `sbom-<product>-partial.yml`. Header comment naming exactly what it does not cover; a `::warning::` step at runtime; `coverage_gap` **required** on the entry | `partial` |
+| `ok` | Generate the workflow | `generated` |
+| `documented-gap`, something generable | Generate one, `install_as` naming `sbom-<product>-partial.yml`. The header's one-line "Not covered" note says what it does not cover; a `::warning::` step at runtime; `coverage_gap` **required** on the entry | `partial` |
 | No tool at all | Generate nothing. Record the gap and what would close it | `no-path` |
-
-Downgrade the `dependencies[]` gate to a warning **only** where the chosen tool
-structurally cannot emit edges. Downgrading it anywhere else hides the exact failure the
-gate exists to catch.
 
 Two calls worth stating outright:
 
@@ -264,7 +259,7 @@ listens for the same event the release listens for, not for the release workflow
 Add `workflow_dispatch` alongside an automatic trigger so a maintainer can regenerate an
 SBOM for an older release without re-tagging.
 
-For a `manual` product, say plainly in both the workflow header comment and your report:
+For a `manual` product, say plainly in the header's "Not covered" note and in your report:
 **SBOM generation is not automatic for this product; it fires when someone remembers.**
 Record it as a coverage gap. A manual workflow that nobody runs is not onboarding.
 
@@ -315,7 +310,7 @@ name — which the `<short_id>-<component>` naming from `/list-products` is ther
 ### Matrixed build roots
 
 `build.matrix` becomes `strategy.matrix` with `fail-fast: false`, one SBOM per entry, each
-uploaded under its own name (see "Upload names"). The four gates and the upload run per
+uploaded under its own name (see "Upload names"). The generation and the upload run per
 entry, so a failed entry shows as a failed job; there is no separate count job.
 
 Map `runs-on` from each target where a GitHub-hosted runner exists. Where none does — a
@@ -328,12 +323,11 @@ Linux-resolved SBOM is a document describing something nobody shipped.
 | `hook.multi_source.strategy` | Build |
 |---|---|
 | `single` | One job. The other sources are build-time only |
-| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge` → **re-run all four gates on the merged document**. Upload only the merged document, under the product key |
+| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge`. Upload only the merged document, under the product key |
 | `link` | No merge job. Each document uploaded under its own name (see "Upload names"); the primary carries `externalReferences[]` of `type: bom` pointing at the others |
 
-**Re-running the gates after a merge is not belt-and-braces.** A merge can drop the
-dependency roots and turn two properly graphed inputs into one flat component list —
-schema-valid, and exactly the failure the gate exists for.
+A merge can drop the dependency roots and turn two properly graphed inputs into one flat
+component list. Nothing in the workflow checks for that (§7).
 
 For `link`, say why it is only conditionally conformant: BSI TR-03183-2 permits linked
 SBOMs when each linked document is itself conformant *and* the referencing creator
@@ -365,11 +359,13 @@ byte-for-byte the one you audited.
    some other version: the patch must be made to the file whose release facts are recorded.
 
 2. Copy it to `<tmp>/<product>.yml` and edit only the copy, changing nothing else:
-   - Insert the version step, the SBOM generation, the four gates and the upload into the
+   - Insert the version step, the SBOM generation and the upload into the
      job that builds the release, after the build steps the SBOM must describe. Open the
-     inserted block with a comment naming what it does and its upload names, and that the
-     upload fails until permission is granted. `continue-on-error: true` on the inserted
-     steps unless `hook.blocks_release` is true.
+     inserted block with the same short comment as a new workflow's header
+     ([`hardening.md`](references/hardening.md)), give the upload step its one-line
+     authorization comment, and add the version variables (`CYCLONEDX_SPEC_VERSION` and
+     each `<TOOL>_VERSION`) to that job's `env:`, not to the workflow's top level.
+     `continue-on-error: true` on the inserted steps unless `hook.blocks_release` is true.
    - Add `id-token: write` to that job's `permissions:`, keeping everything it already
      has; without it the upload cannot get its OIDC token. A job with no `permissions:`
      block gets one listing the workflow-level permissions plus `id-token: write`, because
@@ -402,14 +398,14 @@ their checkout steps will not get applied.
 ## 5. The hardening contract
 
 [`references/hardening.md`](references/hardening.md) is the single source for the skeleton,
-the rule-by-rule detail, the two justified suppressions, and the emit-time audit. Every
+the rule-by-rule detail, the one justified suppression, and the emit-time audit. Every
 workflow you generate satisfies it in full. The rules, in brief — each one a finding class
 from the `zizmor` audit of the earlier prototypes:
 
 full-SHA action pins · top-level `permissions: contents: read` · `id-token: write` on the
 uploading job only · `persist-credentials: false` on every checkout · no `${{ }}` inside
-`run:` · no `workflow_run` · `set -euo pipefail` · `jq -e` gates per document, before the
-upload · `cache: false` on every `setup-*`.
+`run:` · no `workflow_run` · `set -euo pipefail` · dependency caching off on every setup
+action, written the way that action expects (`cache: false` is wrong for some of them).
 
 Two standing preferences:
 
@@ -445,28 +441,30 @@ sha=$(gh api repos/eclipse-csi/workflows/commits/main --jq .sha)   # → @<sha> 
 ```
 
 Pin non-actions the same way: generator versions, CLI versions, container images **by
-digest**.
+digest**. Tool versions go in the workflow's `env:` block as `<TOOL>_VERSION`, beside
+`CYCLONEDX_SPEC_VERSION` (`hardening.md`, "Versions in one place"), never inside a command.
 
 **If `gh` is unavailable or unauthenticated, stop.** Do not fall back to a SHA written in
 any reference file, and do not emit a floating tag — a floating tag is itself a hardening
 violation, so generating one is worse than generating nothing. Offer the user the choice:
 authenticate, or generate with `# PIN-REQUIRED` placeholders and `status: needs-input`.
 
-## 7. The four gates, and why they earn their place
+## 7. What the workflow does not do
 
-The assertions themselves are in [`hardening.md`](references/hardening.md); they run
-against every document produced, before it is uploaded. What they are for:
+### The SBOM is not checked
 
-1. **Spec version is 1.6.** Several generators default *above* 1.6 and two cannot be
-   pinned at all. This has drifted before and will drift again; the assertion costs
-   nothing.
-2. **`dependencies[]` non-empty.** The single most common failure across every ecosystem:
-   a valid CycloneDX document that is a flat component list. Schema-valid and
-   BSI-non-conformant.
-3. **No vulnerability data.** Trivy always emits the key; ORT populates it if `advise`
-   ran. Both are one flag from breaching BSI TR-03183-2, and VEX is a separate artifact.
-4. **`components[]` non-empty.** Catches a resolution that silently produced nothing —
-   normally a missing credential.
+**Generate no step that checks the SBOM.** The workflow uploads the document exactly as
+the generator wrote it, so its correctness and completeness are not checked: not its spec
+version, not that it lists components and dependencies, not that it carries no
+vulnerability data. Say so in your report; the workflow's header comment stays short and
+does not repeat it.
+
+What still guards those properties is the generator configuration from
+[`tool_selection.md`](references/tool_selection.md): the pinned spec version and the
+flags of each invocation. What nothing catches any more, and the report should not imply
+otherwise: a generator update that changes its default spec version, a flat component
+list with no dependency graph, an empty document from a resolution that silently failed
+(often a missing credential), and vulnerability data from a tool that adds it.
 
 ### Enrichment is out of scope, for now
 
@@ -474,8 +472,8 @@ against every document produced, before it is uploaded. What they are for:
 enrichment step existed to read project facts from a sidecar that is no longer produced,
 and an enrichment step without its data file is a step that warns on every run.
 
-State the consequence rather than leaving it implied, in both the workflow header comment
-and your report: **the generated workflow tops out at what the generator itself emits.**
+State the consequence rather than leaving it implied, in your report (not in the workflow's
+header comment): **the generated workflow tops out at what the generator itself emits.**
 BSI TR-03183-2 required fields 3, 6, 9, 10, 11 and 12 are properties of *delivered files*
 — a shipped filename, the digest of the published artifact, whether a component is an
 executable or an archive — not properties of resolved coordinates, so no dependency
@@ -517,13 +515,15 @@ The path is a label on the content, not a file that exists:
   visible in the repo's Actions list once installed, not only in a comment.
 - For `extend-existing`, the path is the **existing** workflow being edited, and the content
   is that whole workflow with the SBOM steps added — see §4.
-- The workflow's own header comment carries what an install document would: every secret
-  that must exist and what each is for, expected first-run behaviour (the upload names and
-  the version each run uploads), the recorded coverage gaps in plain language, that the
-  upload fails until permission for its names is granted and the ticket in §12 requests
-  it, and a `zizmor` line the maintainer can run before installing. It travels
-  with the content, which is the point — a header comment cannot be separated from the
-  workflow it describes the way a sibling `.md` can.
+- The workflow's header comment is short, in the form of the skeleton in
+  [`hardening.md`](references/hardening.md): the products it makes SBOMs for (its upload
+  names), that it was generated with the help of the Eclipse CSI sbom plugin, and where the
+  SBOMs are uploaded and how to view them. Then, only when they apply, one line naming what
+  is not covered and one naming the secrets the build needs. No date, routing-table
+  revision, score, enrichment note or permission-request text: those go in your report.
+  Under the header, the `env:` block holds `CYCLONEDX_SPEC_VERSION` and every tool version,
+  and the upload step carries a one-line comment that it fails until uploads are
+  authorized.
 
 ## 10. Self-audit before recording
 
