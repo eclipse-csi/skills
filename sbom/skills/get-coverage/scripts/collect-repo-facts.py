@@ -7,6 +7,7 @@ The facts are the signals needed to decide whether a repository ships
 something and how repositories group into products:
 
 - metadata: description, topics, languages, homepage, template flag, last push
+- popularity: stars, watchers, forks
 - release history: GitHub release count and latest release, tag count
 - build manifests found anywhere in the tree (per manifest type: count and the
   shallowest paths), ignoring vendored, test, example and doc directories
@@ -75,7 +76,8 @@ IGNORED_DIRS = {
 }
 MAX_PATHS_PER_MANIFEST = 20
 
-REPO_FIELDS = """
+POPULARITY_FIELDS = "stargazerCount forkCount watchers { totalCount }"
+REPO_FIELDS = POPULARITY_FIELDS + """
   nameWithOwner url description homepageUrl isArchived isFork isPrivate isTemplate
   isEmpty pushedAt
   defaultBranchRef { name }
@@ -277,7 +279,8 @@ def full_name_from_url(url: str) -> str:
     return "/".join(url.rstrip("/").split("/")[-2:])
 
 
-def fetch_metadata(github: GitHub, full_names: list, batch_size: int) -> dict:
+def fetch_metadata(github: GitHub, full_names: list, batch_size: int,
+                   fields: str = REPO_FIELDS) -> dict:
     """Fetch GraphQL metadata for all repos, halving the batch size on failure."""
     results = {}
     pending = list(full_names)
@@ -287,7 +290,7 @@ def fetch_metadata(github: GitHub, full_names: list, batch_size: int) -> dict:
         for i, name in enumerate(batch):
             owner, repo = name.split("/")
             aliases.append(f'r{i}: repository(owner: {json.dumps(owner)}, '
-                           f'name: {json.dumps(repo)}) {{ {REPO_FIELDS} }}')
+                           f'name: {json.dumps(repo)}) {{ {fields} }}')
         try:
             data = github.graphql("query {\n" + "\n".join(aliases) + "\n}")
         except (urllib.error.URLError, RuntimeError, TimeoutError,
@@ -304,6 +307,18 @@ def fetch_metadata(github: GitHub, full_names: list, batch_size: int) -> dict:
             results[name] = data.get(f"r{i}")
         print(f"metadata: {len(results)}/{len(full_names)}", file=sys.stderr)
     return results
+
+
+def popularity(meta: dict) -> dict:
+    """Stars, watchers and forks from a repo's GraphQL metadata."""
+    return {"stars": meta["stargazerCount"], "watchers": meta["watchers"]["totalCount"],
+            "forks": meta["forkCount"]}
+
+
+def fetch_popularity(github: GitHub, full_names: list, batch_size: int) -> dict:
+    """Fetch only stars, watchers and forks; return name -> popularity facts."""
+    metadata = fetch_metadata(github, full_names, batch_size, POPULARITY_FIELDS)
+    return {name: popularity(meta) for name, meta in metadata.items() if meta}
 
 
 def blob_text(node: Optional[dict]) -> Optional[str]:
@@ -437,6 +452,7 @@ def build_facts(url: str, meta: Optional[dict], tree_summary: dict) -> dict:
         "template": meta["isTemplate"],
         "empty": meta["isEmpty"],
         "pushed_at": meta.get("pushedAt"),
+        **popularity(meta),
         "default_branch": (meta.get("defaultBranchRef") or {}).get("name"),
         "releases": {
             "count": meta["releases"]["totalCount"],
@@ -452,6 +468,21 @@ def build_facts(url: str, meta: Optional[dict], tree_summary: dict) -> dict:
     }
 
 
+def update_facts(by_name: dict, collect, what: str) -> int:
+    """Merge freshly collected fields into the existing facts of every found repo."""
+    with open(FACTS_FILE, encoding="utf-8") as fh:
+        facts = json.load(fh)
+    names = [n for n, u in by_name.items() if facts.get(u, {}).get("found")]
+    updates = collect(names)
+    for name, fields in updates.items():
+        facts[by_name[name]].update(fields)
+    with open(FACTS_FILE, "w", encoding="utf-8") as fh:
+        json.dump(facts, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    print(f"Updated {what} for {len(updates)} repositories in {FACTS_FILE}", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     """Read github-repos.json, collect facts for each repo and write them."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -459,8 +490,13 @@ def main() -> int:
                         help="repositories per GraphQL query (default: %(default)s)")
     parser.add_argument("--workers", type=int, default=8,
                         help="concurrent file tree requests (default: %(default)s)")
-    parser.add_argument("--release-signals-only", action="store_true",
-                        help=f"only (re)collect workflow release signals into an existing {FACTS_FILE}")
+    only = parser.add_mutually_exclusive_group()
+    only.add_argument("--release-signals-only", action="store_true",
+                      help="only (re)collect workflow release signals into an existing "
+                           f"{FACTS_FILE}")
+    only.add_argument("--popularity-only", action="store_true",
+                      help="only (re)collect stars, watchers and forks into an existing "
+                           f"{FACTS_FILE}")
     args = parser.parse_args()
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -477,18 +513,12 @@ def main() -> int:
     by_name = {full_name_from_url(url): url for url in urls}
 
     if args.release_signals_only:
-        with open(FACTS_FILE, encoding="utf-8") as fh:
-            facts = json.load(fh)
-        names = [n for n, u in by_name.items() if facts.get(u, {}).get("found")]
-        signals = fetch_workflows(github, names)
-        for name, summary in signals.items():
-            facts[by_name[name]].update(summary)
-        with open(FACTS_FILE, "w", encoding="utf-8") as fh:
-            json.dump(facts, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
-        print(f"Updated release signals for {len(signals)} repositories in {FACTS_FILE}",
-              file=sys.stderr)
-        return 0
+        return update_facts(by_name, lambda names: fetch_workflows(github, names),
+                            "release signals")
+    if args.popularity_only:
+        return update_facts(by_name,
+                            lambda names: fetch_popularity(github, names, args.batch_size),
+                            "stars, watchers and forks")
 
     print(f"Collecting facts for {len(by_name)} repositories", file=sys.stderr)
 

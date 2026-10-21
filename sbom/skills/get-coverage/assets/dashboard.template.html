@@ -97,6 +97,18 @@ section{margin-top:40px}
 .pie-legend .cnt{font:400 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-3);min-width:6ch;text-align:right}
 .sortl{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-2)}
 .etable td{vertical-align:middle}
+.etable{min-width:1000px}
+.etable .numc{text-align:right;white-space:nowrap}
+.etable td.numc{font:500 13px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.sorth{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.sorth:hover{color:var(--ink)}
+.sorth .arr{font:13px var(--body);color:var(--ink-3)}
+.sorth.on,.sorth.on .arr{color:var(--covered-ink)}
+.etable .donec{width:1%;text-align:center}
+.etable.no-done .donec{display:none}
+.done-box{width:18px;height:18px;margin:0;accent-color:var(--good-edge);cursor:pointer}
+.done-box:disabled{cursor:default}
+.etable tr.is-done>td{background:var(--good-bg)}
 .ptoggle{font:500 13px var(--mono);color:var(--covered-ink);background:none;border:1px solid var(--rule);border-radius:6px;padding:3px 8px;cursor:pointer;white-space:nowrap}
 .ptoggle:hover{background:var(--chip)}
 .ptoggle .chev{display:inline-block;transition:transform .12s;margin-right:4px}
@@ -320,7 +332,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--rule);font-si
     </div>
     <div class="panel" style="margin-top:24px" id="easy">
       <h3>Easy Candidates for New Adopters</h3>
-      <p class="sub">Projects with no SBOM yet, filtered by what makes SBOM generation easy to adopt. Every condition is on by default; untick one to widen the list. Priority rises with popular ecosystems (Maven, container images, npm, Python), GitHub Actions only, a clear release trigger and GitHub Releases.</p>
+      <p class="sub">Projects with no SBOM yet, filtered by what makes SBOM generation easy to adopt. Every condition is on by default; untick one to widen the list. Priority rises with popular ecosystems (Maven, container images, npm, Python), GitHub Actions only, a clear release trigger and GitHub Releases. Stars, watchers and forks are totals across all of a project's GitHub repositories; click a column's arrow to sort by it.</p>
       <div class="tablebar">
         <input type="search" id="e-q" placeholder="Search projects, ecosystems…" aria-label="Search projects">
         <details class="dd" id="e-eco-dd">
@@ -338,10 +350,20 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--rule);font-si
             <option value="rank">Priority (best first)</option>
             <option value="n-desc">Number of products (most first)</option>
             <option value="n-asc">Number of products (fewest first)</option>
-            <option value="name">Project name</option>
+            <option value="name">Project name (A to Z)</option>
+            <option value="name-desc">Project name (Z to A)</option>
+            <option value="stars-desc">Stars (most first)</option>
+            <option value="stars-asc">Stars (fewest first)</option>
+            <option value="watchers-desc">Watchers (most first)</option>
+            <option value="watchers-asc">Watchers (fewest first)</option>
+            <option value="forks-desc">Forks (most first)</option>
+            <option value="forks-asc">Forks (fewest first)</option>
+            <option value="wf-desc">Workflows (most first)</option>
+            <option value="wf-asc">Workflows (fewest first)</option>
           </select>
         </label>
         <span class="num dim" id="e-count"></span>
+        <span class="dim" id="e-done-note" role="status"></span>
       </div>
       <div class="tablebar e-conds" role="group" aria-label="Conditions">
         <label class="check" for="e-c-active"><input type="checkbox" id="e-c-active" checked> Active in the last 6 months</label>
@@ -351,8 +373,8 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--rule);font-si
         <label class="check" for="e-c-releases"><input type="checkbox" id="e-c-releases" checked> GitHub Releases present</label>
         <label class="check" for="e-c-trigger"><input type="checkbox" id="e-c-trigger" checked> Clear release trigger</label>
       </div>
-      <div class="tscroll"><table class="etable">
-        <thead><tr><th>Project</th><th>Products</th><th>Ecosystems</th><th>Workflows</th><th>Release trigger</th><th>Signals</th></tr></thead>
+      <div class="tscroll"><table class="etable no-done" id="e-table">
+        <thead><tr><th class="donec" title="Tick a project once its SBOM onboarding is done. Everyone sees the ticks; people with edit access can change them.">Done</th><th aria-sort="none"><button type="button" class="sorth" data-sort="name">Project<span class="arr" aria-hidden="true">↕</span></button></th><th aria-sort="none"><button type="button" class="sorth" data-sort="n">Products<span class="arr" aria-hidden="true">↕</span></button></th><th>Ecosystems</th><th class="numc" aria-sort="none" title="Total across all of the project's GitHub repositories"><button type="button" class="sorth" data-sort="stars">Stars<span class="arr" aria-hidden="true">↕</span></button></th><th class="numc" aria-sort="none" title="Total across all of the project's GitHub repositories"><button type="button" class="sorth" data-sort="watchers">Watchers<span class="arr" aria-hidden="true">↕</span></button></th><th class="numc" aria-sort="none" title="Total across all of the project's GitHub repositories"><button type="button" class="sorth" data-sort="forks">Forks<span class="arr" aria-hidden="true">↕</span></button></th><th aria-sort="none" title="Repositories the project's products are built from"><button type="button" class="sorth" data-sort="wf">Workflows<span class="arr" aria-hidden="true">↕</span></button></th><th>Release trigger</th><th>Signals</th></tr></thead>
         <tbody id="e-body"></tbody>
       </table></div>
     </div>
@@ -361,7 +383,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--rule);font-si
 
   <footer>
     <p><b>Sources.</b> Products: <span class="num">github-products.json</span>, produced by per-project analysis of __REPO_COUNT__ GitHub repositories (__PROJECT_COUNT__ Regular and Incubating projects with GitHub repos). SBOM status: Dependency-Track project export, matched by repository URL, purl and name.</p>
-    <p><b>Caveats.</b> Product identification is an unreviewed proposal. Ecosystem is inferred from root-level build files and marks the primary build only. "Active" means a push to any of the product's repositories in the 180 days before __AS_OF__. Container images count only once found in a public registry (__IMG_UNVERIFIED__ image products could not be checked automatically).</p>
+    <p><b>Caveats.</b> Product identification is an unreviewed proposal. Ecosystem is inferred from root-level build files and marks the primary build only. "Active" means a push to any of the product's repositories in the 180 days before __AS_OF__. Container images count only once found in a public registry (__IMG_UNVERIFIED__ image products could not be checked automatically). Stars, watchers and forks are totals across all of a project's GitHub repositories, read from GitHub with the repository facts.</p>
   </footer>
 </div>
 <div class="tip" id="tip" role="tooltip"></div>
@@ -610,10 +632,23 @@ function renderEasy(){
     return !q || (e.p+' '+e.eco.join(' ')+' '+e.release).toLowerCase().includes(q);
   });
   const prio = (a,b)=>b.score-a.score || a.wf-b.wf || a.n-b.n || a.p.localeCompare(b.p);
-  const cmp = {rank:prio, 'n-desc':(a,b)=>b.n-a.n || prio(a,b), 'n-asc':(a,b)=>a.n-b.n || prio(a,b), name:(a,b)=>a.p.localeCompare(b.p)}[sort];
+  // Projects whose stars, watchers or forks were not collected sort last either way.
+  const byNum = (k, desc) => (a,b) => {
+    const x = a[k], y = b[k];
+    if(x == null || y == null) return (x == null) - (y == null) || prio(a,b);
+    return (desc ? y - x : x - y) || prio(a,b);
+  };
+  const cmp = {rank:prio, 'n-desc':(a,b)=>b.n-a.n || prio(a,b), 'n-asc':(a,b)=>a.n-b.n || prio(a,b),
+    name:(a,b)=>a.p.localeCompare(b.p), 'name-desc':(a,b)=>b.p.localeCompare(a.p),
+    'stars-desc':byNum('stars',true), 'stars-asc':byNum('stars',false),
+    'watchers-desc':byNum('watchers',true), 'watchers-asc':byNum('watchers',false),
+    'forks-desc':byNum('forks',true), 'forks-asc':byNum('forks',false),
+    'wf-desc':byNum('wf',true), 'wf-asc':byNum('wf',false)}[sort] || prio;
   list = list.slice().sort(cmp);
+  syncSortHeads(sort);
   const eProducts = list.reduce((s,e)=>s+e.n, 0);
-  $('#e-count').textContent = `${fmt(list.length)} project${list.length===1?'':'s'} · ${fmt(eProducts)} product${eProducts===1?'':'s'}`;
+  easyShown = list;
+  easyCount = `${fmt(list.length)} project${list.length===1?'':'s'} · ${fmt(eProducts)} product${eProducts===1?'':'s'}`;
   const byP = new Map(); DATA.products.forEach(r=>{ if(!byP.has(r.p)) { byP.set(r.p,[]); } byP.get(r.p).push(r); });
   const tagHtml = e => {
     const tags = [['popular ecosystem',e.popular],['GitHub Actions only',e.gha_only],['release trigger',e.rel_ok],['GitHub Releases',e.releases]]
@@ -623,12 +658,91 @@ function renderEasy(){
   $('#e-body').innerHTML = list.map((e,i)=>{
     const id = 'ep'+i;
     const prods = (byP.get(e.p)||[]).map(r=>`<tr><td class="mono">${esc(r.k)}</td><td>${esc(r.eco)}</td><td>${esc(r.ci)}</td><td>${esc(r.rel)}</td><td>${r.sb?'<span class="yes">SBOM uploaded</span>':'<span class="dim">No SBOM</span>'}</td></tr>`).join('');
-    return `<tr><td><b>${esc(e.p)}</b><div class="pmeta">${esc(tlName(e.tl))} · ${esc(e.st)}</div></td>
+    const across = `title="Total across ${e.nrepos} GitHub repositor${e.nrepos===1?'y':'ies'}"`;
+    const pop = k => `<td class="numc" ${across}>${e[k] == null ? '<span class="dim">–</span>' : fmt(e[k])}</td>`;
+    const box = e.id ? `<input type="checkbox" class="done-box" data-id="${esc(e.id)}" aria-label="${esc(e.p)} is done"${DONE.has(e.id)?' checked':''}${doneEditable?'':' disabled'}>` : '';
+    return `<tr${DONE.has(e.id)?' class="is-done"':''}><td class="donec">${box}</td><td><b>${esc(e.p)}</b><div class="pmeta">${esc(tlName(e.tl))} · ${esc(e.st)}</div></td>
       <td><button type="button" class="ptoggle" aria-expanded="false" aria-controls="${id}" data-row="${id}"><span class="chev">›</span>${e.n} product${e.n===1?'':'s'}</button></td>
-      <td>${esc(e.eco.join(', '))}</td><td class="mono">${e.wf}</td><td>${esc(e.release)}</td><td>${tagHtml(e)}</td></tr>
-      <tr class="prow" id="${id}" hidden><td colspan="6"><table class="subt"><tbody>${prods}</tbody></table></td></tr>`;
-  }).join('') || '<tr><td colspan="6" class="dim">No projects match. Clear the search, or untick a condition or ecosystem to widen the list.</td></tr>';
+      <td>${esc(e.eco.join(', '))}</td>${pop('stars')}${pop('watchers')}${pop('forks')}<td class="mono">${e.wf}</td><td>${esc(e.release)}</td><td>${tagHtml(e)}</td></tr>
+      <tr class="prow" id="${id}" hidden><td class="donec"></td><td colspan="9"><table class="subt"><tbody>${prods}</tbody></table></td></tr>`;
+  }).join('') || '<tr><td class="donec"></td><td colspan="9" class="dim">No projects match. Clear the search, or untick a condition or ecosystem to widen the list.</td></tr>';
+  showDoneCount();
 }
+// "Done" ticks live in the artifact's shared db (collection "done", one document per project
+// id), so they survive dashboard refreshes. Everyone sees them; the page's db rule lets only
+// people with edit access change them. Without db (a local file, a signed-out view) the column
+// stays hidden.
+const DONE = new Set();
+let doneDb = null, doneEditable = false, easyShown = [], easyCount = '';
+function showDoneCount(){
+  const n = easyShown.filter(e => DONE.has(e.id)).length;
+  $('#e-count').textContent = easyCount + (doneDb && n ? ` · ${fmt(n)} done` : '');
+}
+function applyDone(){
+  document.querySelectorAll('#e-body .done-box').forEach(cb=>{
+    const on = DONE.has(cb.dataset.id);
+    cb.checked = on;
+    cb.disabled = !doneEditable || cb.dataset.busy === '1';
+    cb.closest('tr').classList.toggle('is-done', on);
+  });
+  showDoneCount();
+}
+(async ()=>{
+  const use = window.claude && window.claude.use;
+  if(!use) return;
+  const [db, user] = await Promise.all([use('db'), use('user')]);
+  if(!db) return;
+  doneDb = db;
+  doneEditable = user ? await user.canEdit() : true;   // unknown: keep the boxes and let a refused write decide
+  $('#e-table').classList.remove('no-done');
+  db.collection('done').onSnapshot(snap=>{
+    DONE.clear();
+    snap.docs.forEach(d=>{ if(d.exists && (d.data() || {}).done) DONE.add(d.id); });
+    applyDone();
+  }, ()=>{ doneEditable = false; $('#e-done-note').textContent = 'Done ticks could not be loaded. Reload the page to try again.'; applyDone(); });
+  applyDone();
+})();
+$('#e-body').addEventListener('change', async ev=>{
+  const cb = ev.target.closest('.done-box'); if(!cb || !doneDb) return;
+  const on = cb.checked, ref = doneDb.collection('done').doc(cb.dataset.id);
+  cb.dataset.busy = '1'; cb.disabled = true;
+  try {
+    if(on) await ref.set({done: true, at: new Date().toISOString()}); else await ref.delete();
+    if(on) DONE.add(cb.dataset.id); else DONE.delete(cb.dataset.id);
+    $('#e-done-note').textContent = '';
+  } catch(err) {
+    const code = err && err.code;
+    if(code === 'invalid_argument' || code === 'revoked' || code === 'not_granted') {
+      doneEditable = false;
+      $('#e-done-note').textContent = 'You can see the done ticks, but only people with edit access can change them.';
+    } else {
+      $('#e-done-note').textContent = "That tick wasn't saved. Try again.";
+    }
+  } finally {
+    delete cb.dataset.busy;
+    applyDone();
+  }
+});
+// Column arrows and the "Sort by" list share one state: the list's value.
+function syncSortHeads(sort){
+  document.querySelectorAll('#easy .sorth').forEach(btn=>{
+    const k = btn.dataset.sort;
+    const asc = k === 'name' ? sort === 'name' : sort === k + '-asc';
+    const desc = sort === k + '-desc';
+    btn.closest('th').setAttribute('aria-sort', asc ? 'ascending' : desc ? 'descending' : 'none');
+    btn.querySelector('.arr').textContent = asc ? '↑' : desc ? '↓' : '↕';
+    btn.classList.toggle('on', asc || desc);
+  });
+}
+// Project name sorts A to Z first; the counts (products, stars, watchers, forks, workflows)
+// sort most first. A second click reverses.
+$('#easy thead').addEventListener('click', ev=>{
+  const btn = ev.target.closest('.sorth'); if(!btn) return;
+  const k = btn.dataset.sort, cur = $('#e-sort').value;
+  if(k === 'name') $('#e-sort').value = cur === 'name' ? 'name-desc' : 'name';
+  else $('#e-sort').value = cur === k + '-desc' ? k + '-asc' : k + '-desc';
+  renderEasy();
+});
 function togglePP(row){
   const el = $('#c-proj'), box = document.getElementById(row.dataset.id), open = row.getAttribute('aria-expanded')==='true';
   if(!open && !box.dataset.filled){ box.innerHTML = el._render(el._detail.get(row.dataset.id)); box.dataset.filled = '1'; }
