@@ -96,7 +96,13 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
   workflow files recorded in `report.json`, verbatim, after the user agrees to its dry
   run. Its script runs nothing in a clone, never overwrites a file without a second
   confirmation, and writes a patch only over the exact file it was made from
-  (`base_sha256`).
+  (`base_sha256`). A product's files (its SBOM workflow and any release patch) are
+  written together or not at all.
+- **An SBOM run that needs something the release publishes follows publishing**, in the way
+  the user chose in `get-metadata` (`hook.after_publish`). The SBOM always runs in its own
+  job, never inside a job that publishes and holds secrets, is never passed secrets, and
+  never relies on `workflow_run` or a token beyond the default one. Siblings in the same
+  checkout are built in the same run instead (Maven `-am`), never fetched from a registry.
 - **`get-coverage` writes only into the current working directory:** `github-repos.json`,
   `github-projects.json`, `github-repo-facts.json`, `github-products.json` (previous version
   kept as `github-products.previous.json`), `products-with-sboms.json`, `sbom-adoption.html`

@@ -130,7 +130,7 @@ generated workflow both come from its `env:` block: `$CYCLONEDX_SPEC_VERSION` an
 | OS filesystem (deb/rpm/apk) | Syft | **5** | `output-suffix` | `-o cyclonedx-json@1.6` | Debian source packages not modelled |
 | Debian, source packages needed | debsbom | **4** | `native-1.6` | `-t cdx --with-licenses` | **813 of 1,194 components unlicensed** in a verified run |
 | 3+ ecosystems in one product | ORT | **5** | `flag` | `analyze` → `report`; **never `advise`** | Operational weight; per-ecosystem config |
-| Maven | cyclonedx-maven-plugin | **5** | `flag` | `makeAggregateBom`, `-DschemaVersion=1.6`, `-DoutputFormat=json` | `provided`/`system` scopes included by default |
+| Maven | cyclonedx-maven-plugin | **5** | `flag` | `makeAggregateBom`, `-DschemaVersion=1.6`, `-DoutputFormat=json`; over the whole build, or `-pl <module> -am` for one module (§5, rule 5) | `provided`/`system` scopes included by default |
 | Maven, Tycho | cyclonedx-maven-plugin | **4** | `flag` | Same, against the Tycho reactor | P2/OSGi units resolve outside Maven coordinates |
 | Gradle, plain JVM | cyclonedx-gradle-plugin | **5** | `flag` | `--init-script`; glob for the output path | Upstream docs disagree on the output path — glob, do not hardcode |
 | Gradle, Android | cyclonedx-gradle-plugin | **4** | `flag` | **`includeConfigs` = shipping variant** | Default merges debug + test configurations |
@@ -247,6 +247,21 @@ failure modes that recur across every ecosystem.
    TFM/RID/Configuration, `includeConfigs`, `--only prod`, `--omit=dev`,
    `--without development:test`. An SBOM resolved for the wrong target describes something that
    was never shipped.
+5. **Build a product's siblings from the same checkout in the same run.** When a product is
+   one part of a bigger build, its siblings in that checkout must be part of the same
+   resolution, never fetched from a registry. For Maven, generate over the whole build, or
+   with `-pl <module> -am`; **never `-pl <module>` alone, and never from inside the
+   module's folder.** Without the siblings in the run, Maven looks them up in a registry
+   where, at release time, they are not published yet, and the plugin does not fail: it
+   warns "The POM for … is missing, no dependency information available", lists the
+   sibling and **drops the sibling's own dependencies**. Reproduced with
+   cyclonedx-maven-plugin 2.9.3: module `b` depending on sibling `a`, which depends on
+   `commons-lang3`, loses `commons-lang3` under `-pl b` or from `b/`, and keeps it over the
+   whole build or with `-pl b -am`. The same principle elsewhere: install workspaces from
+   their root (npm, pnpm, Yarn), install sibling Python packages from the checkout together
+   in one `pip install`, keep Gradle subprojects in the one build. Only parts that are
+   **not** in the checkout can need a registry; those are `hook.needs_published`
+   (get-metadata §4).
 
 ### The ceiling applies to every path too
 

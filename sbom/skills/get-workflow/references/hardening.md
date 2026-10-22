@@ -303,13 +303,191 @@ upload, and a failed entry shows as a failed job.
 Where a target has no GitHub-hosted runner, **do not silently resolve it on Linux** —
 record the platform as a coverage gap.
 
+## Running after the release publishes
+
+When the SBOM run needs something a release publishes (`hook.needs_published`), it has to
+start after publishing, in the way the user chose (`hook.after_publish.option`,
+get-metadata §4). Three of the options add to the release workflow; these are their
+shapes. Everything else in this file still applies to them.
+
+### Security rules
+
+These hold for every option. None of them may be relaxed to make a workflow fit.
+
+- **The SBOM never runs in a job that holds publishing secrets.** It is its own job, after
+  the publish jobs (`needs:`), never steps inside them: an SBOM generator is third-party
+  code, and the publish job holds the registry credentials and signing keys.
+- **No secrets are passed to an SBOM job:** no `secrets:` on a call, never
+  `secrets: inherit`, no `${{ secrets.* }}` beyond what the build itself needs to resolve
+  (`build.credentials_required`).
+- **`actions: write` only on a start job**, `start-sbom-<product>`, whose only step starts
+  the SBOM workflow with `gh` (preinstalled on the runner): no `uses:` step, no third-party
+  code next to that permission.
+- **Never `workflow_run`**, and nothing started from another repository: starting a
+  workflow across repositories needs a token the default one cannot be.
+- **Every value passed on is checked first**, like any dispatch input: the tag against the
+  version pattern, a digest against `^sha256:[0-9a-f]{64}$`.
+- The added jobs carry `continue-on-error: true` unless `hook.blocks_release` is true, so an
+  SBOM failure never turns a finished release red. (A reusable-workflow call cannot carry
+  it; that is the trade-off of `release-calls-sbom`, below.)
+
+### The pushed image's digest
+
+For a container product the SBOM scans the image the release pushed, by digest. Each
+option runs only after the push job has finished, so the digest is read from the registry
+by the tag the release pushed, in a step before generation. The release's own publish job
+is not touched:
+
+```yaml
+      - name: Find the pushed image's digest
+        id: image
+        env:
+          IMAGE: <registry/org/name, as the release pushes it>
+          TAG: ${{ steps.version.outputs.version }}   # the image tag, if the release tags it differently
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no image digest for $IMAGE:$TAG"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+```
+
+The generation step then scans `registry:${IMAGE}@${DIGEST}`. A private registry needs its
+login, recorded in `build.credentials_required`.
+
+### `sbom-job-in-release`: an SBOM job in the release workflow
+
+One file, recorded as the `kind: patch` workflow (`SKILL.md` §4, `extend-existing`): the
+release workflow with one job added at the end. Its steps are the skeleton's, with the ref
+and version taken from the release run itself (`${{ github.ref }}`,
+`${{ github.ref_name }}`):
+
+```yaml
+  # SBOMs for: <upload names>
+  # Generated with the help of the Eclipse CSI sbom plugin (https://github.com/eclipse-csi/skills).
+  # The SBOMs are uploaded to the Eclipse Foundation SBOM Registry (https://sbom.eclipse.org).
+  # To view or download them, see https://csi.eclipse.dev/security-handbook/sbom/registry.html
+  sbom-<product>:
+    name: SBOM for <product>
+    needs: [<after_jobs>]
+    runs-on: ubuntu-latest
+    continue-on-error: true       # a failing SBOM never fails the release
+    permissions:
+      contents: read              # check out the release tag
+      id-token: write             # the OIDC token PIA authenticates the upload with
+    env:
+      CYCLONEDX_SPEC_VERSION: "1.6"
+      <TOOL>_VERSION: "<x.y.z>"
+    steps:
+      <checkout at ${{ github.ref }}, version from ${{ github.ref_name }}, the image digest
+       when it is an image, generation, upload: as in the skeleton>
+```
+
+### `release-starts-sbom`: a start job, the SBOM as its own run
+
+Two files. The SBOM workflow is the skeleton with `workflow_dispatch` as its only trigger,
+the release tag as its `ref` input, and a header line saying what starts it:
+
+```yaml
+# Started by the release workflow (<after_publish.workflow>) once it has published.
+...
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to build the SBOM for"
+        required: true
+        type: string
+```
+
+and the release patch (`pipeline.release_patch`) adds one job:
+
+```yaml
+  # Starts the SBOM workflow (.github/workflows/sbom-<product>.yml) once the release has published.
+  start-sbom-<product>:
+    name: Start the SBOM workflow
+    needs: [<after_jobs>]
+    runs-on: ubuntu-latest
+    continue-on-error: true       # a failing start never fails the release
+    permissions:
+      actions: write              # only to start the SBOM workflow
+    steps:
+      - name: Start the SBOM workflow for this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$REF" =~ ^[0-9A-Za-z][0-9A-Za-z._+/-]{0,127}$ ]] || { echo "::error::unexpected ref: $REF"; exit 1; }
+          gh workflow run sbom-<product>.yml --ref "$REF" -f ref="$REF"
+```
+
+The default token may start a workflow this way (GitHub starts no run from most events it
+causes, but `workflow_dispatch` is an exception), so no other token is needed. `--ref` runs
+the SBOM workflow as it is at the release tag: it has to be committed before that release
+is tagged. Only for a release workflow that runs on a tag or a GitHub release, where
+`github.ref_name` is the tag; one that creates its tag during the run is `needs-input`.
+
+### `release-calls-sbom`: the SBOM as a reusable workflow, in the release run
+
+Two files. The SBOM workflow takes `workflow_call` with the same `ref` input, and keeps
+`workflow_dispatch` for re-running an older release by hand:
+
+```yaml
+# Called by the release workflow (<after_publish.workflow>) once it has published.
+...
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Release tag to build the SBOM for"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to build the SBOM for"
+        required: true
+        type: string
+```
+
+and the release patch adds the calling job, with no `secrets:`:
+
+```yaml
+  # Calls the SBOM workflow (.github/workflows/sbom-<product>.yml) once the release has published.
+  sbom-<product>:
+    name: SBOM for <product>
+    needs: [<after_jobs>]
+    permissions:
+      contents: read              # check out the release tag
+      id-token: write             # the OIDC token PIA authenticates the upload with
+    uses: ./.github/workflows/sbom-<product>.yml
+    with:
+      ref: ${{ github.ref_name }}
+```
+
+A job calling a reusable workflow cannot carry `continue-on-error`, so a failing SBOM
+marks the release run as failed, after the release has published. Say so when offering
+this option. `zizmor` reports a Low `self-repository` note on the `./` path, suggesting a
+`$/` form that `actionlint` 1.7.12 rejects: keep `./`; a Low finding does not block.
+
+### Several products after one release workflow
+
+When several products follow the same release workflow (several images pushed by one
+release, for example), make **one** release patch that adds every product's job, and record
+that same patch on each of them. `/write-workflow` writes it once, and only together with
+all their SBOM workflows.
+
 ## Emit-time audit
 
 Run over every generated file before writing `report.json`. A failure means regenerate.
+Pass `release-patch` as the second argument for a release patch that only starts or calls
+the SBOM workflow, which has no upload of its own.
 
 ```bash
 set -euo pipefail
 f="$1"
+kind="${2:-}"
 
 # 1. every uses: is a full SHA with a version comment (or "# main (date)" for an
 #    action published without releases)
@@ -334,17 +512,19 @@ for n, line in enumerate(src, 1):
             sys.exit(f"template injection at line {n}: {line.strip()}")
 PY
 
-# 3. no workflow_run trigger
-! grep -q 'workflow_run' "$f"
+# 3. no workflow_run trigger. (Not "! grep": set -e never stops on a negated command.)
+if grep -q 'workflow_run' "$f"; then echo "workflow_run in $f"; exit 1; fi
 
 # 4. one persist-credentials: false per checkout
-[ "$(grep -c 'actions/checkout' "$f")" -eq "$(grep -c 'persist-credentials: false' "$f")" ]
+[ "$(grep -c 'actions/checkout' "$f")" -eq "$(grep -c 'persist-credentials: false' "$f")" ] ||
+  { echo "a checkout without persist-credentials: false in $f"; exit 1; }
 
 # 5. top-level permissions are present
-grep -q '^permissions:' "$f"
+grep -q '^permissions:' "$f" || { echo "no top-level permissions: in $f"; exit 1; }
 
 # 6. the PIA upload: id-token: write only at job level, and at least one upload step
-python3 - "$f" <<'PY'
+#    (none in a release patch that only starts or calls the SBOM workflow)
+python3 - "$f" "$kind" <<'PY'
 import re, sys
 src = open(sys.argv[1]).read().splitlines()
 top, uploads = None, 0
@@ -355,8 +535,26 @@ for n, line in enumerate(src, 1):
         sys.exit(f"id-token permission at the top level, line {n}")
     if 'eclipse-csi/workflows/upload-sbom@' in line:
         uploads += 1
-if not uploads:
+if not uploads and sys.argv[2] != 'release-patch':
     sys.exit("no upload-sbom step")
+PY
+
+# 7. no secrets handed on wholesale
+if grep -qE 'secrets:\s*inherit' "$f"; then echo "secrets: inherit in $f"; exit 1; fi
+
+# 8. actions: write only on a start-sbom-* job, and that job runs no action
+python3 - "$f" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read().splitlines()
+job = None
+for n, line in enumerate(src, 1):
+    m = re.match(r'^  ([A-Za-z0-9_-]+):\s*(#.*)?$', line)
+    if m:
+        job = m.group(1)
+    if re.match(r'^\s+actions:\s*write', line) and not (job or '').startswith('start-sbom-'):
+        sys.exit(f"actions: write outside a start-sbom-* job, line {n}")
+    if (job or '').startswith('start-sbom-') and re.match(r'^\s+(-\s+)?uses:', line):
+        sys.exit(f"a start-sbom-* job must not run an action, line {n}")
 PY
 ```
 

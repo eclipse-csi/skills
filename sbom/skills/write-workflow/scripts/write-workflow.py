@@ -3,10 +3,14 @@
 
 Every product whose get-workflow status is generated, partial or patch-proposed carries
 its workflow verbatim in pipeline.workflow.content: a new file (kind workflow), or the
-whole existing workflow with the SBOM steps added (kind patch). This script writes exactly
-that content, at pipeline.workflow.install_as, into the clone of pipeline.host_repo found
-under a checkouts folder. A patch is written only over the exact file get-workflow
-patched (pipeline.workflow.base_sha256).
+whole existing workflow with the SBOM steps added (kind patch). A product whose SBOM
+workflow is started from its release workflow also carries pipeline.release_patch: that
+release workflow with the one added job, always a patch. This script writes exactly that
+content, at install_as, into the clone of pipeline.host_repo found under a checkouts
+folder. A patch is written only over the exact file get-workflow patched (base_sha256).
+
+Files that belong together are written together or not at all: a product's workflow and
+its release patch, and the products that share one release patch, which is written once.
 
     write-workflow.py set-root               read the checkouts folder from stdin, record it
     write-workflow.py [plan]                 check the clones, show what would change
@@ -18,8 +22,9 @@ The checkouts folder is kept in report.json (write.root), so no path is passed o
 command line. Clones are found at the folder itself and one and two levels below it, by
 the GitHub remotes in their .git/config. Nothing is ever run: no git, nothing inside a
 clone, no commit, branch or push. The dry run writes nothing. A plan is applied whole;
-replacing a file that exists with other content also needs --replace. Each product's
-outcome is recorded in pipeline.workflow.written. Standard library only.
+replacing a file that exists with other content also needs --replace. Each file's
+outcome is recorded in its own written field (pipeline.workflow.written,
+pipeline.release_patch.written). Standard library only.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ GITHUB_REMOTE = re.compile(
     re.IGNORECASE)
 SECTION = re.compile(r'\[\s*([A-Za-z0-9.-]+)(\s+"[^"]*")?\s*\]')
 SCAN_DEPTH = 2
+SLOTS = ("workflow", "release_patch")
 DONE = {"create": "created", "replace": "replaced", "patch": "patched"}
 WRITE_LABEL, REPLACE_LABEL = "Write them", "Replace them"
 
@@ -257,13 +263,13 @@ def classify(entry: dict, workflow: dict) -> None:
         entry["action"] = "create" if current is None else "replace"
 
 
-def plan_entry(name: str, pipeline: dict, repos: dict) -> dict:
-    """What would happen to one product's workflow."""
-    workflow, repo = pipeline.get("workflow") or {}, pipeline.get("host_repo")
-    entry = {"product": name, "repo": repo, "file": workflow.get("install_as"),
+def plan_entry(name: str, pipeline: dict, repos: dict, slot: str = "workflow") -> dict:
+    """What would happen to one of a product's files: its workflow, or its release patch."""
+    workflow, repo = pipeline.get(slot) or {}, pipeline.get("host_repo")
+    entry = {"product": name, "slot": slot, "repo": repo, "file": workflow.get("install_as"),
              "checkout": None, "target": None, "current": None, "content": None,
              "before": None, "after": None, "edited": False, "ambiguous": False,
-             "action": "skip", "reason": None, "record": True}
+             "action": "skip", "reason": None, "record": True, "leader": None}
     if pipeline.get("status") not in WRITABLE or not workflow:
         entry["reason"] = f"status {pipeline.get('status')}: no workflow to write"
         entry["record"] = False
@@ -285,17 +291,49 @@ def plan_entry(name: str, pipeline: dict, repos: dict) -> dict:
 
 
 def skip_shared_targets(entries: list) -> None:
-    """Two products writing one file would each overwrite the other: write neither."""
+    """Several entries writing one file: written once when they all carry the same content
+    (one release patch shared by the products it starts), otherwise none of them, since
+    each would overwrite the other."""
     by_target = {}
     for entry in entries:
         if entry["target"] is not None:
             by_target.setdefault(entry["target"], []).append(entry)
     for shared in (group for group in by_target.values() if len(group) > 1):
+        if len({entry["content"] for entry in shared}) == 1:
+            for follower in shared[1:]:
+                follower["leader"] = shared[0]
+            continue
         names = ", ".join(entry["product"] for entry in shared)
         for entry in shared:
             entry["action"] = "skip"
-            entry["reason"] = (f"{names} all write this file: re-run /get-workflow so "
-                               "that one workflow covers them")
+            entry["reason"] = (f"{names} all write this file with different content: re-run "
+                               "/get-workflow so that one file covers them")
+
+
+def write_together(entries: list) -> None:
+    """Skip every file of a group when one of them is skipped. A group is a product's
+    workflow and release patch, joined with the products sharing that release patch: an
+    SBOM workflow nothing starts, or a start job for a workflow that is not there, is a
+    half-installed change."""
+    group = {entry["product"]: entry["product"] for entry in entries}
+
+    def root(product: str) -> str:
+        while group[product] != product:
+            product = group[product]
+        return product
+
+    for entry in entries:
+        if entry["leader"] is not None:
+            group[root(entry["product"])] = root(entry["leader"]["product"])
+    skipped = {}
+    for entry in entries:
+        if entry["record"] and entry["action"] == "skip":
+            skipped.setdefault(root(entry["product"]), f"{entry['product']}: {entry['file']}")
+    for entry in entries:
+        why = skipped.get(root(entry["product"]))
+        if entry["record"] and why and entry["action"] != "skip":
+            entry["action"] = "skip"
+            entry["reason"] = f"written together with {why}, which is skipped"
 
 
 def build_plan(report: dict) -> dict:
@@ -309,15 +347,18 @@ def build_plan(report: dict) -> dict:
     repos = {pipeline["host_repo"]: resolve_repo(pipeline["host_repo"], clones, chosen)
              for _, pipeline in pipelines
              if pipeline.get("status") in WRITABLE and pipeline.get("host_repo")}
-    entries = [plan_entry(name, pipeline, repos) for name, pipeline in pipelines]
+    entries = [plan_entry(name, pipeline, repos, slot) for name, pipeline in pipelines
+               for slot in SLOTS if slot == "workflow" or pipeline.get(slot)]
     skip_shared_targets(entries)
+    write_together(entries)
     return {"root": root, "repos": repos, "entries": entries}
 
 
 def fingerprint(plan: dict) -> str:
     """Identifies a plan: the clones, the files, the actions, and the bytes before and after."""
-    rows = [[e["product"], e["repo"], str(e["checkout"]) if e["checkout"] else None,
-             e["file"], e["action"], e["before"], e["after"]] for e in plan["entries"]]
+    rows = [[e["product"], e["slot"], e["repo"], str(e["checkout"]) if e["checkout"] else None,
+             e["file"], e["action"], e["before"], e["after"], e["leader"] is not None]
+            for e in plan["entries"]]
     return sha256(json.dumps([str(plan["root"]), rows]).encode("utf-8"))
 
 
@@ -360,6 +401,8 @@ def fenced(text: str, lang: str) -> str:
 def action_text(entry: dict) -> str:
     """The Action column of the plan table."""
     text = entry["action"] if entry["action"] != "skip" else f"skip: {entry['reason']}"
+    if entry["leader"] is not None and entry["action"] != "skip":
+        text += f" (the same file as for {entry['leader']['product']}, written once)"
     if entry["edited"] and entry["action"] != "skip":
         text += " (**edited since audit**)"
     return cell(text)
@@ -396,7 +439,7 @@ def print_plan(plan: dict) -> None:
         print("**Edited since audit:** the content recorded for " + ", ".join(edited) +
               " is not what get-workflow audited (its sha256 differs or is missing). "
               "Re-run /get-workflow to have it audited again.\n")
-    changes = [e for e in plan["entries"] if e["action"] in DONE]
+    changes = [e for e in plan["entries"] if e["action"] in DONE and e["leader"] is None]
     if changes:
         print("### Changes\n")
     for e in changes:
@@ -430,7 +473,7 @@ def print_choices(plan: dict) -> None:
 
 def counted(entries: list, action: str, one: str, many: str) -> str:
     """'2 new files', '1 patched workflow' — empty when there are none."""
-    n = sum(1 for e in entries if e["action"] == action)
+    n = sum(1 for e in entries if e["action"] == action and e["leader"] is None)
     return f"{n} {one if n == 1 else many}" if n else ""
 
 
@@ -448,7 +491,8 @@ def print_go_ahead(plan: dict) -> None:
               [(WRITE_LABEL, "Write exactly the changes shown above. Nothing is committed "
                              "or pushed."),
                ("Cancel", "Write nothing.")]))
-    replaced = [f"{e['repo']}: {e['file']}" for e in entries if e["action"] == "replace"]
+    replaced = [f"{e['repo']}: {e['file']}" for e in entries
+                if e["action"] == "replace" and e["leader"] is None]
     if replaced:
         print("Then ask this. Only the answer \"" + REPLACE_LABEL + "\" adds `--replace`:\n")
         print(ask("These files already exist with different content. Replace them with the "
@@ -546,18 +590,22 @@ def apply(report: dict, expected: str, replace: bool) -> int:
               "nothing was written. Run the dry run again, and ask again.")
         return 2
     print("## Written\n\n| Product | Repository | File | Result |\n|---|---|---|---|")
-    failed = False
+    failed, outcomes = False, {}
     for entry in (e for e in plan["entries"] if e["record"]):
-        outcome, reason, error = carry_out(entry, replace)
-        failed |= error
-        report["products"][entry["product"]]["pipeline"]["workflow"]["written"] = \
+        if entry["leader"] is not None:  # the same file, already written for its leader
+            outcome, reason = outcomes[id(entry["leader"])]
+        else:
+            outcome, reason, error = carry_out(entry, replace)
+            failed |= error
+        outcomes[id(entry)] = (outcome, reason)
+        report["products"][entry["product"]]["pipeline"][entry["slot"]]["written"] = \
             written(entry, outcome, reason)
         result = outcome if not reason else f"{outcome}: {reason}"
         print(f"| `{entry['product']}` | `{entry['repo'] or '-'}` | `{entry['file'] or '-'}` "
               f"| {cell(result)} |")
     save_report(report)
-    print("\nRecorded in report.json, under each product's pipeline.workflow.written. "
-          "Nothing was committed or pushed.")
+    print("\nRecorded in report.json, under each file's written field (pipeline.workflow, "
+          "pipeline.release_patch). Nothing was committed or pushed.")
     return 1 if failed else 0
 
 

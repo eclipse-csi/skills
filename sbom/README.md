@@ -134,6 +134,14 @@ anything it does not cover. Just below, the CycloneDX version and every tool ver
 together in one `env:` block, so they are easy to update. Where SBOM generation has to go into your existing release workflow
 instead, you get the diff against that workflow.
 
+**When the SBOM has to wait for the release to publish** — an image it scans, or a part of
+the project built and published separately — `/get-metadata` explains why and asks how the
+SBOM should follow publishing, offering only the options that fit and add no security risk:
+an SBOM job at the end of your release workflow, a small job there that starts the SBOM
+workflow as its own run, a call to it as a reusable workflow, or running it by hand. The
+first three add one job to your release workflow, which you then get as a diff; your
+publish jobs are not changed and the SBOM job never sees their secrets.
+
 **The workflows written into your clones, if you ask for it** — with `/write-workflow`, or
 `--write` on `/onboard`. Point it at a clone, or at a folder holding clones one or two
 levels down; it finds each repository's clone by its git remotes. It first shows a dry run:

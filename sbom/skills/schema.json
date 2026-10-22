@@ -338,8 +338,8 @@
               "description": "Required when strategy is extend-existing; omitted otherwise."
             },
             "on": {
-              "description": "Must match the event the existing release listens for. Never workflow_run — that was a High-severity finding in earlier prototype workflows.",
-              "enum": ["github-release", "tag", "manual"]
+              "description": "What the SBOM workflow listens for. `github-release`, `tag` and `manual` mirror the trigger the existing release uses. `release-dispatch`: started by a job added at the end of the release workflow, as its own run (workflow_dispatch). `release-call`: called from the end of the release workflow as a reusable workflow (workflow_call), inside the release run. Never workflow_run — that was a High-severity finding in earlier prototype workflows.",
+              "enum": ["github-release", "tag", "manual", "release-dispatch", "release-call"]
             },
             "tag_pattern": {"type": "string"},
             "verified_against_history": {
@@ -372,9 +372,96 @@
                 "rationale": {"type": "string"}
               },
               "additionalProperties": false
+            },
+            "needs_published": {
+              "type": "array",
+              "minItems": 1,
+              "description": "What the SBOM run needs that a release publishes, so that it can only run after publishing. Absent when it needs nothing published. Siblings built in the same run (the whole Maven build, `-am`, workspaces) never appear here.",
+              "items": {
+                "type": "object",
+                "required": ["what", "name", "why", "published_by", "promotion", "miss"],
+                "properties": {
+                  "what": {"enum": ["image", "package"]},
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The image repository (e.g. ghcr.io/org/app) or the package coordinates (e.g. org.example:core, @scope/pkg, pkg)."
+                  },
+                  "registry": {
+                    "type": "string",
+                    "description": "Where it is published: ghcr.io, docker.io, quay.io, Maven Central, npmjs.org, PyPI, nuget.org, crates.io, ..."
+                  },
+                  "why": {
+                    "description": "`scan-published-image`: the SBOM is made by scanning the pushed image. `sibling-not-built`: the build resolves another part of the project, at the release version, from its registry instead of building it in the same run.",
+                    "enum": ["scan-published-image", "sibling-not-built"]
+                  },
+                  "published_by": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The workflow that publishes it, as a path in the host repo, or org/repo when another repository publishes it."
+                  },
+                  "promotion": {
+                    "description": "`manual` when it only becomes public after a human step (manual publishing on Maven Central, a staging repository).",
+                    "enum": ["automatic", "manual"]
+                  },
+                  "miss": {
+                    "description": "What the SBOM run does if it is not published yet: fails, or succeeds with a thinner SBOM (Maven drops the missing module's dependencies with only a warning).",
+                    "enum": ["fails", "silent"]
+                  },
+                  "release_needs_it": {
+                    "type": "boolean",
+                    "description": "For a sibling from another repository: true when this product's own release build already resolves it, so it is published before the release can run."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "after_publish": {
+              "type": "object",
+              "description": "How the SBOM run is ordered after publishing, chosen by the user per product from the options that fit (get-metadata §4). Required whenever needs_published is set.",
+              "required": ["option", "offered", "reason"],
+              "properties": {
+                "option": {
+                  "description": "`not-needed`: nothing has to wait (e.g. the release build itself needs the sibling). `sbom-job-in-release`: a separate SBOM job added to the release workflow after its publish jobs. `release-starts-sbom`: a job added at the end of the release workflow starts the SBOM workflow as its own run. `release-calls-sbom`: the release workflow calls the SBOM workflow as a reusable workflow. `manual`: run by hand once the release is public.",
+                  "enum": ["not-needed", "sbom-job-in-release", "release-starts-sbom", "release-calls-sbom", "manual"]
+                },
+                "offered": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {"enum": ["not-needed", "sbom-job-in-release", "release-starts-sbom", "release-calls-sbom", "manual"]},
+                  "description": "The options the user was offered, which include the chosen one."
+                },
+                "workflow": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Path, in the host repo, of the release workflow the SBOM follows. Required for the three options that change it."
+                },
+                "after_jobs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {"type": "string", "minLength": 1},
+                  "description": "Job ids in that workflow that publish what the SBOM needs; the added job runs only after all of them succeed."
+                },
+                "reason": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "$comment": "The options that change the release workflow must say which workflow and after which jobs.",
+                  "if": {
+                    "properties": {"option": {"enum": ["sbom-job-in-release", "release-starts-sbom", "release-calls-sbom"]}},
+                    "required": ["option"]
+                  },
+                  "then": {"required": ["workflow", "after_jobs"]},
+                  "else": {"not": {"anyOf": [{"required": ["workflow"]}, {"required": ["after_jobs"]}]}}
+                }
+              ]
             }
           },
           "additionalProperties": false,
+          "dependentRequired": {"needs_published": ["after_publish"]},
           "allOf": [
             {
               "if": {
@@ -566,12 +653,19 @@
             }
           ]
         },
+        "release_patch": {
+          "description": "Only when the SBOM workflow is started or called from the release workflow (hook.after_publish.option release-starts-sbom or release-calls-sbom): the whole release workflow with the one added job, as a patch. Same shape as `workflow`, always `kind: patch`; write-workflow writes it together with `workflow` or not at all.",
+          "allOf": [
+            {"$ref": "#/$defs/pipeline/properties/workflow"},
+            {"properties": {"kind": {"const": "patch"}}, "required": ["kind"]}
+          ]
+        },
         "trigger": {
           "type": "object",
-          "description": "What fires the generated workflow. Mirrors the trigger the existing release actually uses — never workflow_run, which was a High-severity finding in the prototypes.",
+          "description": "What fires the generated workflow. Mirrors the trigger the existing release actually uses, or the start from the release workflow that hook.after_publish chose — never workflow_run, which was a High-severity finding in the prototypes.",
           "required": ["on"],
           "properties": {
-            "on": {"enum": ["github-release", "tag", "manual"]},
+            "on": {"enum": ["github-release", "tag", "manual", "release-dispatch", "release-call"]},
             "events": {
               "type": "array",
               "items": {"type": "string"},
