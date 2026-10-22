@@ -75,8 +75,12 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
 
 - **CycloneDX 1.6, JSON, pinned explicitly.** 1.6 is a registry-compatibility floor, not a
   tooling ceiling: several generators now default to 1.7, and Trivy and osv-scalibr emit
-  1.7 with no selector flag at all. Every generated workflow pins the spec version *and*
-  asserts `jq -e '.specVersion == "1.6"'`. This has drifted before and will drift again.
+  1.7 with no selector flag at all. Every generated workflow pins the spec version
+  explicitly, once, as `CYCLONEDX_SPEC_VERSION` in its top-level `env:` block, beside an
+  exact `<TOOL>_VERSION` for each tool it installs; steps read the variables and never
+  write the numbers themselves. This has drifted before and will drift again, and the
+  workflow does not catch it: **the generated SBOM is not checked**, so its correctness
+  and completeness are not verified. The report says so.
 - **No vulnerability data in an SBOM** (BSI TR-03183-2). VEX is a separate artifact.
 - **Ecosystem-native generators over universal scanners** — native tools resolve the build
   graph and emit the dependency relationships BSI requires. Syft and cdxgen are for
@@ -92,7 +96,13 @@ These are the rules the whole repo exists to enforce. Everything else is negotia
   workflow files recorded in `report.json`, verbatim, after the user agrees to its dry
   run. Its script runs nothing in a clone, never overwrites a file without a second
   confirmation, and writes a patch only over the exact file it was made from
-  (`base_sha256`).
+  (`base_sha256`). A product's files (its SBOM workflow and any release patch) are
+  written together or not at all.
+- **An SBOM run that needs something the release publishes follows publishing**, in the way
+  the user chose in `get-metadata` (`hook.after_publish`). The SBOM always runs in its own
+  job, never inside a job that publishes and holds secrets, is never passed secrets, and
+  never relies on `workflow_run` or a token beyond the default one. Siblings in the same
+  checkout are built in the same run instead (Maven `-am`), never fetched from a registry.
 - **`get-coverage` writes only into the current working directory:** `github-repos.json`,
   `github-projects.json`, `github-repo-facts.json`, `github-products.json` (previous version
   kept as `github-products.previous.json`), `products-with-sboms.json`, `sbom-adoption.html`

@@ -98,6 +98,74 @@ def _rule_extend_existing_target(report: dict[str, Any]) -> Iterator[str]:
             )
 
 
+STARTED_FROM_RELEASE = {"release-starts-sbom": "release-dispatch",
+                        "release-calls-sbom": "release-call"}
+
+
+def _after_publish_problems(hook: dict[str, Any]) -> Iterator[str]:
+    """What is inconsistent between hook.after_publish and the rest of the hook."""
+    after = hook.get("after_publish") or {}
+    option, needed = after.get("option"), hook.get("needs_published") or []
+    if option and option not in (after.get("offered") or []):
+        yield f"after_publish.option {option!r} is not among the options offered"
+    if option and option != "not-needed" and not needed:
+        yield (f"after_publish.option {option!r} with no needs_published entry saying what "
+               f"must be published first")
+    if option == "not-needed" and any(n.get("why") == "scan-published-image" for n in needed):
+        yield ("an image cannot be scanned before it is pushed, so after_publish cannot be "
+               "'not-needed'")
+    if option == "sbom-job-in-release" and (hook.get("strategy") != "extend-existing"
+                                            or hook.get("target") != after.get("workflow")):
+        yield ("'sbom-job-in-release' patches the release workflow: strategy must be "
+               "'extend-existing' with target equal to after_publish.workflow")
+    if option in STARTED_FROM_RELEASE and (hook.get("strategy") != "new-workflow"
+                                           or hook.get("on") != STARTED_FROM_RELEASE[option]):
+        yield (f"{option!r} needs strategy 'new-workflow' and on "
+               f"{STARTED_FROM_RELEASE[option]!r}")
+    if option == "manual" and hook.get("on") != "manual":
+        yield "after_publish.option 'manual' needs on 'manual'"
+    for option_needed, on in STARTED_FROM_RELEASE.items():
+        if hook.get("on") == on and option != option_needed:
+            yield f"on {on!r} is only used with after_publish.option {option_needed!r}"
+
+
+def _rule_after_publish(report: dict[str, Any]) -> Iterator[str]:
+    """`hook.after_publish` agrees with what must be published and with the hook.
+
+    An SBOM run that needs something the release publishes has to be ordered after it
+    (get-metadata §4). A choice that contradicts the trigger or the strategy generates a
+    workflow that races the release again, or patches the wrong file.
+    """
+    for name, product in (report.get("products") or {}).items():
+        hook = ((product.get("release") or {}).get("hook")) or {}
+        for problem in _after_publish_problems(hook):
+            yield f"products.{name}.release.hook: {problem}."
+
+
+def _rule_release_patch(report: dict[str, Any]) -> Iterator[str]:
+    """`pipeline.release_patch` exists exactly when the release workflow starts the SBOM.
+
+    Without it the SBOM workflow, which no longer listens for the release itself, never
+    runs; with it for any other option, a release workflow is changed for nothing.
+    """
+    for name, product in (report.get("products") or {}).items():
+        pipeline = product.get("pipeline") or {}
+        if pipeline.get("status") not in {"generated", "partial"}:
+            continue
+        after = (((product.get("release") or {}).get("hook")) or {}).get("after_publish") or {}
+        patch = pipeline.get("release_patch")
+        if after.get("option") in STARTED_FROM_RELEASE and not patch:
+            yield (f"products.{name}.pipeline: after_publish.option {after['option']!r} but no "
+                   f"release_patch: nothing starts the SBOM workflow.")
+        elif patch and after.get("option") not in STARTED_FROM_RELEASE:
+            yield (f"products.{name}.pipeline.release_patch is set but after_publish.option is "
+                   f"{after.get('option')!r}, which does not change the release workflow.")
+        elif patch and patch.get("install_as") != after.get("workflow"):
+            yield (f"products.{name}.pipeline.release_patch.install_as "
+                   f"{patch.get('install_as')!r} is not after_publish.workflow "
+                   f"{after.get('workflow')!r}.")
+
+
 def _rule_sources_in_repos(report: dict[str, Any]) -> Iterator[str]:
     """Every `sources[].repo` must exist in `project.repos`.
 
@@ -257,21 +325,25 @@ WRITTEN_ACTIONS = {
 }
 
 
+FILE_SLOTS = ("workflow", "release_patch")
+
+
 def _rule_written_action(report: dict[str, Any]) -> Iterator[str]:
-    """`workflow.written` records an action its kind can have.
+    """`written` records an action its file's kind can have.
 
     A new workflow is created or replaced; a patch only ever patches the file it was made
     from. Anything else means the record and the workflow it describes have drifted apart.
     """
     for name, product in (report.get("products") or {}).items():
-        workflow = (product.get("pipeline") or {}).get("workflow") or {}
-        action = (workflow.get("written") or {}).get("action")
-        allowed = WRITTEN_ACTIONS.get(workflow.get("kind"), set())
-        if action and action not in allowed:
-            yield (
-                f"products.{name}.pipeline.workflow.written: action {action!r} is not "
-                f"possible for kind {workflow.get('kind')!r}."
-            )
+        for slot in FILE_SLOTS:
+            workflow = (product.get("pipeline") or {}).get(slot) or {}
+            action = (workflow.get("written") or {}).get("action")
+            allowed = WRITTEN_ACTIONS.get(workflow.get("kind"), set())
+            if action and action not in allowed:
+                yield (
+                    f"products.{name}.pipeline.{slot}.written: action {action!r} is not "
+                    f"possible for kind {workflow.get('kind')!r}."
+                )
 
 
 def _rule_write_checkouts(report: dict[str, Any]) -> Iterator[str]:
@@ -292,6 +364,8 @@ ERROR_RULES = (
     _rule_hook_immutable_input,
     _rule_fidelity_risk_null,
     _rule_extend_existing_target,
+    _rule_after_publish,
+    _rule_release_patch,
     _rule_sources_in_repos,
     _rule_generator_targets_matrix,
     _rule_pipeline_needs_release,
@@ -310,14 +384,15 @@ def _rule_workflow_sha256(report: dict[str, Any]) -> Iterator[str]:
     when asked, flagged as edited since the audit.
     """
     for name, product in (report.get("products") or {}).items():
-        workflow = (product.get("pipeline") or {}).get("workflow") or {}
-        recorded, content = workflow.get("sha256"), workflow.get("content")
-        if (recorded and isinstance(content, str)
-                and hashlib.sha256(content.encode("utf-8")).hexdigest() != recorded):
-            yield (
-                f"products.{name}.pipeline.workflow: content does not match its "
-                f"sha256, so it is not the workflow get-workflow audited."
-            )
+        for slot in FILE_SLOTS:
+            workflow = (product.get("pipeline") or {}).get(slot) or {}
+            recorded, content = workflow.get("sha256"), workflow.get("content")
+            if (recorded and isinstance(content, str)
+                    and hashlib.sha256(content.encode("utf-8")).hexdigest() != recorded):
+                yield (
+                    f"products.{name}.pipeline.{slot}: content does not match its "
+                    f"sha256, so it is not the workflow get-workflow audited."
+                )
 
 
 WARNING_RULES = (_rule_shipping_repos_covered, _rule_workflow_sha256)

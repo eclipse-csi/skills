@@ -207,6 +207,85 @@ stopped using. Set `verified_against_history` to record whether you did.
 If a product's release is `manual`, say clearly that SBOM generation will not be
 automatic for it, and that this is a coverage gap.
 
+### When the SBOM needs something the release publishes
+
+A standalone SBOM workflow listens for the same event as the release, so both start at
+the same moment. It can therefore not count on anything the release publishes: an image
+is not pushed yet, a package is not on its registry yet (Maven Central can take an hour or
+more after upload). Work out, per product, whether the SBOM run needs anything published,
+and record each thing in `hook.needs_published`:
+
+- **A container image to scan** (`what: image`, `why: scan-published-image`). Always, for
+  a container product: the SBOM describes the pushed image, by digest. `published_by` is
+  the workflow that pushes it.
+- **A part of the project that is not built in the same run** (`what: package`,
+  `why: sibling-not-built`). Read the build files: a dependency on the project's own
+  modules or packages, at the release version, that is not part of this build root (not a
+  module of the Maven build, not a workspace member, not in the checkout). `published_by`
+  is the workflow in this repo that publishes it, or `org/repo` when another repository
+  does. For another repository, set `release_needs_it: true` when this product's own
+  release build already resolves it: then it is published before this release can run.
+- **Siblings in the same checkout are never a need.** The generated workflow builds them in
+  the same run (`/get-workflow`'s `tool_selection.md` §5, rule 5).
+
+For each entry also record `promotion` and `miss`:
+- `promotion: manual` when publishing ends in a human step: Maven Central with manual
+  publishing (`autoPublish` false, `USER_MANAGED`), a staging repository released by hand,
+  an image pushed to a staging tag and retagged later. Otherwise `automatic`.
+- `miss: silent` when the SBOM run would still succeed without it, with a thinner SBOM.
+  Maven does this: it warns that the POM is missing and drops that part's dependencies.
+  `miss: fails` when the run fails instead, which is usual for images, npm, pip, NuGet and
+  Cargo.
+
+**Then offer the options that fit, and only those.** None of them adds a security risk,
+and none waits by polling a registry:
+
+| Situation | Options to offer |
+|---|---|
+| An image, or a sibling, published by a workflow in this repo, automatically | `sbom-job-in-release`, `release-starts-sbom`, `release-calls-sbom`, `manual` |
+| A sibling from another repo that this release itself needs (`release_needs_it`) | `not-needed`, `manual` |
+| A sibling from another repo that this release does not need | `manual` only: nothing in this repository knows when the other one has published |
+| Publishing ends in a human step (`promotion: manual`) | `manual`. If the promotion is itself a workflow in this repo, also the three options above, attached to that workflow |
+| The release workflow does not run on a tag or a GitHub release (it creates its tag during the run) | `manual`, with the question of how the tag is known in `needs_review` |
+
+Never offer, whatever the situation: `workflow_run`; starting a workflow in another
+repository (the default token cannot, and another token is a secret to manage); SBOM
+steps inside a job that publishes and holds secrets; passing secrets to the SBOM job.
+Where a product needs nothing published, ask nothing and keep the trigger above.
+
+**Ask the user**, with your question tool, one question per product. Products that follow
+the same release workflow can share one question. Explain first, in plain words: what the
+SBOM needs, who publishes it, and that without this the SBOM run races the release. Then
+offer each fitting option with what it means for the project:
+
+- **SBOM job in the release workflow** (`sbom-job-in-release`). One file changes: their
+  release workflow gets one job at the end, after the publish jobs. It runs with no secrets
+  and never turns a finished release red.
+- **Release starts the SBOM workflow** (`release-starts-sbom`). Two files: a new SBOM
+  workflow, and one small job at the end of the release workflow that starts it as its own
+  run. Only that job gets the `actions: write` permission, and it runs no third-party code.
+  A failing SBOM never affects the release run.
+- **Release calls the SBOM workflow** (`release-calls-sbom`). Two files, as above, but the
+  SBOM runs inside the release run as a reusable workflow. No extra permission, but a
+  failing SBOM marks the release run as failed, which cannot be switched off.
+- **Manual** (`manual`). A maintainer runs the SBOM workflow by hand once the release is
+  public. Not automatic, so it is a coverage gap.
+- **Nothing to wait for** (`not-needed`), when it applies: say why, for example that the
+  release build itself needs the sibling.
+
+Record the answer in `hook.after_publish`: `option`, `offered` (every option you offered),
+`reason`, and for the three options that change the release workflow, `workflow` (its path)
+and `after_jobs` (the ids of the jobs that publish what the SBOM needs, read from that
+workflow). The option sets the rest of the hook:
+
+| `after_publish.option` | `hook.strategy` | `hook.on` |
+|---|---|---|
+| `sbom-job-in-release` | `extend-existing`, `target` = `after_publish.workflow` | the release's trigger, as above |
+| `release-starts-sbom` | `new-workflow` | `release-dispatch` |
+| `release-calls-sbom` | `new-workflow` | `release-call` |
+| `manual` | `new-workflow` | `manual`, a coverage gap |
+| `not-needed` | unchanged | unchanged |
+
 ### Multi-source products
 
 When a product has more than one `sources` entry it produces more than one SBOM, so
@@ -318,9 +397,27 @@ python3 "<skill base directory>/../validate-report.py"
 
 `hook.strategy` is `new-workflow` (default) or `extend-existing`; `hook.target` is
 required for `extend-existing` and omitted otherwise; `hook.on` is
-`github-release`, `tag`, or `manual`; `hook.fidelity_risk` is `null` only when
+`github-release`, `tag`, or `manual`, or `release-dispatch` / `release-call` when the
+release workflow starts the SBOM; `hook.fidelity_risk` is `null` only when
 `immutable_input` is `oci-digest`; `hook.blocks_release` is `false` unless a failed
-SBOM step should fail the release too.
+SBOM step should fail the release too. `hook.needs_published` and `hook.after_publish` are
+present only for a product whose SBOM run needs something published (§4). A container
+product, for example, records:
+
+```json
+"needs_published": [
+  {"what": "image", "name": "ghcr.io/example/app", "registry": "ghcr.io",
+   "why": "scan-published-image", "published_by": ".github/workflows/release.yml",
+   "promotion": "automatic", "miss": "fails"}
+],
+"after_publish": {
+  "option": "release-starts-sbom",
+  "offered": ["sbom-job-in-release", "release-starts-sbom", "release-calls-sbom", "manual"],
+  "workflow": ".github/workflows/release.yml",
+  "after_jobs": ["image"],
+  "reason": "the user chose a separate SBOM run so the release run is never affected"
+}
+```
 
 `confidence` is not decorative — it is how the builder tells a verified fact from an
 inference. Use `high` only when the release pipeline and the release history were both
@@ -342,6 +439,8 @@ Flag explicitly:
 - Products already emitting an SBOM from an existing pipeline, and at what spec version.
 - Multi-repo products — say which repo you propose to host the workflow and why.
 - Any product where `extend-existing` was chosen, and what forced it.
+- **Any product whose SBOM run needs something published first**: what, who publishes it,
+  the option the user chose, and whether the release workflow will change.
 - **Any build root whose resolution flags or toolchain you could not observe** — the
   builder will otherwise generate a plausible-looking workflow that resolves a
   different graph than the release did.

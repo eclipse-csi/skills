@@ -23,6 +23,13 @@ says what goes where:
   the SBOM steps added. It is written only over the exact file get-workflow patched
   (`base_sha256`); a clone holding any other version of it is skipped.
 
+A product whose SBOM workflow is started or called by its release workflow also has
+`pipeline.release_patch`: that release workflow with one added job, always a patch. **A
+product's files are written together or not at all**: if either is skipped, so is the
+other, since an SBOM workflow nothing starts, or a start job for a missing workflow, is a
+half-installed change. Products that share one release patch get it written once, and
+they too are written together.
+
 Every step that finds, compares or writes runs in the script next to this skill:
 
 ```sh
@@ -116,7 +123,8 @@ Pass the fingerprint the dry run printed. The script recomputes the plan and wri
 if anything changed since — exit code 2. Then go back to step 3 and ask again; an answer
 given to an earlier plan never carries over.
 
-Every outcome is recorded in `pipeline.workflow.written`. Validate:
+Every outcome is recorded in its file's `written` field (`pipeline.workflow.written`,
+`pipeline.release_patch.written`). Validate:
 
 ```sh
 python3 "<skill base directory>/../validate-report.py"

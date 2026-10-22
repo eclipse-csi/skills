@@ -95,6 +95,9 @@ Summarise across the whole project, not per skill:
 - **Products with a generated workflow** — the path each belongs at. `/get-workflow`
   already printed the YAML; point back to it rather than reprinting.
 - **Products with partial coverage** — what their SBOM will not contain, concretely.
+- **Products whose release workflow changes** — those whose SBOM has to follow publishing
+  (`hook.after_publish`, chosen during `/get-metadata`): which release workflow, what is
+  added to it, and that the SBOM workflow must be committed before the next release.
 - **Products with no workflow** — and what would change that: a confirmation, a
   credential, a toolchain migration, or a tool that does not exist yet.
 - **`project.coverage_gaps`** — shipping repositories not covered at all, and which

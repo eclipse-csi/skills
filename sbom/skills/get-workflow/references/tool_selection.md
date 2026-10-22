@@ -115,10 +115,14 @@ one whose silent drift produces a document the registry rejects:
 
 | Control | Meaning |
 |---|---|
-| `native-1.6` | Emits 1.6 by default. Still assert it — defaults move |
+| `native-1.6` | Emits 1.6 by default. Still pin it explicitly — defaults move |
 | `flag` | Needs an explicit selector flag |
 | `output-suffix` | Encoded in the `-o` argument |
 | `convert-required` | Cannot emit 1.6 at all; a `cyclonedx-cli convert` step is mandatory |
+
+The invocations below show the spec version as `1.6` and leave tool versions out. In a
+generated workflow both come from its `env:` block: `$CYCLONEDX_SPEC_VERSION` and one
+`<TOOL>_VERSION` per tool ([`hardening.md`](hardening.md), "Versions in one place").
 
 | Ecosystem / condition | Tool | Score | Control | Non-negotiable invocation | Gap to record |
 |---|---|---:|---|---|---|
@@ -126,7 +130,7 @@ one whose silent drift produces a document the registry rejects:
 | OS filesystem (deb/rpm/apk) | Syft | **5** | `output-suffix` | `-o cyclonedx-json@1.6` | Debian source packages not modelled |
 | Debian, source packages needed | debsbom | **4** | `native-1.6` | `-t cdx --with-licenses` | **813 of 1,194 components unlicensed** in a verified run |
 | 3+ ecosystems in one product | ORT | **5** | `flag` | `analyze` → `report`; **never `advise`** | Operational weight; per-ecosystem config |
-| Maven | cyclonedx-maven-plugin | **5** | `flag` | `makeAggregateBom`, `-DschemaVersion=1.6`, `-DoutputFormat=json` | `provided`/`system` scopes included by default |
+| Maven | cyclonedx-maven-plugin | **5** | `flag` | `makeAggregateBom`, `-DschemaVersion=1.6`, `-DoutputFormat=json`; over the whole build, or `-pl <module> -am` for one module (§5, rule 5) | `provided`/`system` scopes included by default |
 | Maven, Tycho | cyclonedx-maven-plugin | **4** | `flag` | Same, against the Tycho reactor | P2/OSGi units resolve outside Maven coordinates |
 | Gradle, plain JVM | cyclonedx-gradle-plugin | **5** | `flag` | `--init-script`; glob for the output path | Upstream docs disagree on the output path — glob, do not hardcode |
 | Gradle, Android | cyclonedx-gradle-plugin | **4** | `flag` | **`includeConfigs` = shipping variant** | Default merges debug + test configurations |
@@ -227,26 +231,37 @@ immediately.
 
 ## 5. Applies to every path
 
-Four checks, independent of the tool chosen. The first three are cheap guards against the failure
-modes that recur across every ecosystem.
+Rules for the generator invocation, independent of the tool chosen. The generated workflow
+does not check the SBOM it produces (`SKILL.md` §7), so these are the only guards against the
+failure modes that recur across every ecosystem.
 
-```bash
-jq -e '.specVersion == "1.6"'        bom.json   # spec drift: 6+ tools default above 1.6
-jq -e '(.dependencies | length) > 0' bom.json   # the most common failure: a flat component list
-jq -e 'has("vulnerabilities") | not' bom.json   # BSI-F2: Trivy and ORT are one flag from breaching
-jq -e '(.components | length) > 0'   bom.json
-```
-
-1. **Pin and assert the spec version.** Syft, cdxgen, `pnpm sbom`, cyclonedx-dotnet,
-   cyclonedx-ruby and SwiftPM all default **above** 1.6; Trivy and osv-scalibr emit 1.7 with no
-   selector. This will drift again.
-2. **Assert `dependencies[]` is non-empty.** Where a tool structurally cannot emit edges, emit a
-   `::warning::` and record the gap — do not fail silently.
-3. **Assert no vulnerability data.** Trivy always emits the key; ORT populates it if `advise` ran.
+1. **Pin the spec version explicitly**, through the workflow's `CYCLONEDX_SPEC_VERSION`.
+   Syft, cdxgen, `pnpm sbom`, cyclonedx-dotnet, cyclonedx-ruby and SwiftPM all default
+   **above** 1.6; Trivy and osv-scalibr emit 1.7 with no selector. This will drift again, and
+   nothing in the workflow will notice when it does.
+2. **Where a tool structurally cannot emit dependency edges, record the gap.** A flat component
+   list is the most common failure across ecosystems.
+3. **Generate no vulnerability data.** Trivy always emits the key; ORT populates it if `advise`
+   ran. VEX is a separate artifact.
 4. **Resolve with the inputs the release actually uses** — GOOS/GOARCH, `CARGO_BUILD_TARGET`,
    TFM/RID/Configuration, `includeConfigs`, `--only prod`, `--omit=dev`,
    `--without development:test`. An SBOM resolved for the wrong target describes something that
    was never shipped.
+5. **Build a product's siblings from the same checkout in the same run.** When a product is
+   one part of a bigger build, its siblings in that checkout must be part of the same
+   resolution, never fetched from a registry. For Maven, generate over the whole build, or
+   with `-pl <module> -am`; **never `-pl <module>` alone, and never from inside the
+   module's folder.** Without the siblings in the run, Maven looks them up in a registry
+   where, at release time, they are not published yet, and the plugin does not fail: it
+   warns "The POM for … is missing, no dependency information available", lists the
+   sibling and **drops the sibling's own dependencies**. Reproduced with
+   cyclonedx-maven-plugin 2.9.3: module `b` depending on sibling `a`, which depends on
+   `commons-lang3`, loses `commons-lang3` under `-pl b` or from `b/`, and keeps it over the
+   whole build or with `-pl b -am`. The same principle elsewhere: install workspaces from
+   their root (npm, pnpm, Yarn), install sibling Python packages from the checkout together
+   in one `pip install`, keep Gradle subprojects in the one build. Only parts that are
+   **not** in the checkout can need a registry; those are `hook.needs_published`
+   (get-metadata §4).
 
 ### The ceiling applies to every path too
 

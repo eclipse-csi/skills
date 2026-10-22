@@ -20,7 +20,7 @@ Five things are returned. Nothing else is in scope:
 | # | Output | Scope |
 |---|---|---|
 | 1 | **Generator choice** — which tool, and the rule that picked it | per source |
-| 2 | **A hardened workflow** — CycloneDX 1.6, gated, fully pinned. Recorded in `pipeline.workflow` and printed in the reply, with the path it belongs at | product |
+| 2 | **A hardened workflow** — CycloneDX 1.6, fully pinned. Recorded in `pipeline.workflow` and printed in the reply, with the path it belongs at | product |
 | 3 | **`generator` and `pipeline` in `./report.json`** | product |
 | 4 | **The coverage-gap register** — what will not be covered, and why | project |
 | 5 | **The upload-permission request** — a draft HelpDesk ticket and a link that opens it pre-filled (§12) | project |
@@ -75,6 +75,7 @@ that product and is recorded, not worked around.
 | `confidence.level` is `low` and nothing records a human reviewing it | Low confidence means the product boundary itself is a guess. A workflow is the wrong artifact to attach to a guess |
 | `hook.immutable_input` is `none` but `hook.strategy` is `new-workflow` | `get-metadata` §4 says nothing immutable forces `extend-existing`. A standalone workflow here re-resolves against whatever `HEAD` happens to be |
 | `hook.strategy` is `extend-existing` with no `hook.target` | Nothing says which pipeline to patch |
+| `hook.needs_published` is set but `hook.after_publish` is not | The SBOM run needs something the release publishes, and nobody chose how it follows publishing (`get-metadata` §4). A workflow on the release's own trigger races the release |
 | `hook.fidelity_risk` is `null` and `immutable_input` is not `oci-digest` | Only a digest describes the shipped bytes. A null risk anywhere else claims a guarantee the approach does not give |
 | A `ships: true` repo appears in no product's `sources` | See §3 — this is a project-level gap, recorded rather than generated around |
 
@@ -192,12 +193,11 @@ graph* than the release did: `GOOS`/`GOARCH` for Go, TFM/RID/Configuration for .
 If `build.resolution_flags` and `build.toolchain` do not supply it, **do not fill it in
 from what the ecosystem usually needs.** Write the step with a `TODO(resolution)` marker
 in its `env:` block, set `status: needs-input`, and put the specific question in
-`needs_review`. The generated workflow would still run, still pass every gate, and still
-be wrong.
+`needs_review`. The generated workflow would still run, still upload, and still be wrong.
 
 **Credentials.** Each entry in `build.credentials_required` needed to *resolve*
 dependencies (not merely to publish) is wired into the job as `env:` from `secrets.*`,
-named in the generated workflow's header comment, and repeated in your report. If a
+named in the header's one-line "Needs secrets" note, and repeated in your report. If a
 required credential cannot exist in GitHub Actions — a Jenkins-managed SSH key, an
 on-prem-only token — set `status: blocked`.
 
@@ -210,13 +210,9 @@ Each `generator` entry records `assessment`:
 
 | `assessment` | What to do | `status` |
 |---|---|---|
-| `ok` | Generate the workflow. All four gates enforced as hard failures | `generated` |
-| `documented-gap`, something generable | Generate one, `install_as` naming `sbom-<product>-partial.yml`. Header comment naming exactly what it does not cover; a `::warning::` step at runtime; `coverage_gap` **required** on the entry | `partial` |
+| `ok` | Generate the workflow | `generated` |
+| `documented-gap`, something generable | Generate one, `install_as` naming `sbom-<product>-partial.yml`. The header's one-line "Not covered" note says what it does not cover; a `::warning::` step at runtime; `coverage_gap` **required** on the entry | `partial` |
 | No tool at all | Generate nothing. Record the gap and what would close it | `no-path` |
-
-Downgrade the `dependencies[]` gate to a warning **only** where the chosen tool
-structurally cannot emit edges. Downgrading it anywhere else hides the exact failure the
-gate exists to catch.
 
 Two calls worth stating outright:
 
@@ -256,6 +252,8 @@ Read `hook.on` and use the trigger the existing release actually uses:
 | `github-release` | `release: types: [published]` |
 | `tag` | `push: tags: [<hook.tag_pattern>]` |
 | `manual` | `workflow_dispatch` with a typed, validated input |
+| `release-dispatch` | `workflow_dispatch` only, input `ref`: started by a job added to the release workflow ("After the release publishes") |
+| `release-call` | `workflow_call` with input `ref`, plus `workflow_dispatch` with the same input for re-runs: called from the release workflow |
 
 **Never `workflow_run`.** Chaining off the release run is the obvious-looking build and it
 is wrong — it was a High-severity finding in the earlier prototypes. A standalone workflow
@@ -264,9 +262,36 @@ listens for the same event the release listens for, not for the release workflow
 Add `workflow_dispatch` alongside an automatic trigger so a maintainer can regenerate an
 SBOM for an older release without re-tagging.
 
-For a `manual` product, say plainly in both the workflow header comment and your report:
+For a `manual` product, say plainly in the header's "Not covered" note and in your report:
 **SBOM generation is not automatic for this product; it fires when someone remembers.**
 Record it as a coverage gap. A manual workflow that nobody runs is not onboarding.
+
+### After the release publishes
+
+When `hook.needs_published` is set, the SBOM run must follow publishing in the way the user
+chose, `hook.after_publish.option` (`get-metadata` §4). The shapes, the image-digest step and
+the security rules are in [`hardening.md`](references/hardening.md), "Running after the
+release publishes":
+
+| `after_publish.option` | What you generate |
+|---|---|
+| `sbom-job-in-release` | **One file**: the release workflow `after_publish.workflow` with one SBOM job added at the end, `needs: [<after_jobs>]`, recorded as the `kind: patch` workflow (`extend-existing` below) |
+| `release-starts-sbom` | **Two files**: the SBOM workflow (`hook.on: release-dispatch`), and in `pipeline.release_patch` the release workflow with one `start-sbom-<product>` job added |
+| `release-calls-sbom` | **Two files**: the SBOM workflow (`hook.on: release-call`), and in `pipeline.release_patch` the release workflow with one job calling it |
+| `manual` | One file, `hook.on: manual`: the coverage gap above |
+| `not-needed` | Nothing different: the workflow as for any product |
+
+Build the release patch exactly like an `extend-existing` patch (steps 1 to 4 below): the
+release workflow read at the permalink `/get-metadata` recorded for `after_publish.workflow`,
+edited only by adding the one job, audited against its base, recorded whole with
+`base_sha256` and `base_ref`, printed as a diff. The SBOM workflow and its release patch are
+written together or not at all (`/write-workflow`). Several products after one release
+workflow get one patch adding all their jobs, recorded on each of them.
+
+For a container product, every option runs after the push job has finished, so the
+generation reads the pushed image's digest by its tag first (`hardening.md`). Say in your
+report which release workflow changes and how, and that the SBOM workflow must be committed
+before the next release is tagged, since the release starts it as it is at that tag.
 
 ### Product version
 
@@ -281,6 +306,9 @@ product, `release.versioning.defines_release`:
 | `registry-version` | The tag, when `versioning` records that the registry version is the tag; otherwise as `manifest-version` |
 | `manifest-version` | Read from the manifest at the checked-out ref, after the toolchain is set up — e.g. `1.2.0-SNAPSHOT` |
 | `none-found` | No version to upload under: `status: needs-input`, with the question in `needs_review` |
+
+For `hook.on` `release-dispatch` and `release-call`, the release tag arrives as the `ref`
+input: `${{ inputs.ref }}`, checked like any dispatch input.
 
 Reading a manifest version, one command per ecosystem, run inside the version step:
 
@@ -315,7 +343,7 @@ name — which the `<short_id>-<component>` naming from `/list-products` is ther
 ### Matrixed build roots
 
 `build.matrix` becomes `strategy.matrix` with `fail-fast: false`, one SBOM per entry, each
-uploaded under its own name (see "Upload names"). The four gates and the upload run per
+uploaded under its own name (see "Upload names"). The generation and the upload run per
 entry, so a failed entry shows as a failed job; there is no separate count job.
 
 Map `runs-on` from each target where a GitHub-hosted runner exists. Where none does — a
@@ -328,12 +356,11 @@ Linux-resolved SBOM is a document describing something nobody shipped.
 | `hook.multi_source.strategy` | Build |
 |---|---|
 | `single` | One job. The other sources are build-time only |
-| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge` → **re-run all four gates on the merged document**. Upload only the merged document, under the product key |
+| `merge` | One job per source → a merge job running a pinned `cyclonedx-cli merge`. Upload only the merged document, under the product key |
 | `link` | No merge job. Each document uploaded under its own name (see "Upload names"); the primary carries `externalReferences[]` of `type: bom` pointing at the others |
 
-**Re-running the gates after a merge is not belt-and-braces.** A merge can drop the
-dependency roots and turn two properly graphed inputs into one flat component list —
-schema-valid, and exactly the failure the gate exists for.
+A merge can drop the dependency roots and turn two properly graphed inputs into one flat
+component list. Nothing in the workflow checks for that (§7).
 
 For `link`, say why it is only conditionally conformant: BSI TR-03183-2 permits linked
 SBOMs when each linked document is itself conformant *and* the referencing creator
@@ -364,12 +391,19 @@ byte-for-byte the one you audited.
    than `pipeline.host_repo`, re-run `/get-metadata` for the product rather than reading
    some other version: the patch must be made to the file whose release facts are recorded.
 
-2. Copy it to `<tmp>/<product>.yml` and edit only the copy, changing nothing else:
-   - Insert the version step, the SBOM generation, the four gates and the upload into the
+2. Copy it to `<tmp>/<product>.yml` and edit only the copy, changing nothing else.
+   For `after_publish.option` `sbom-job-in-release`, and for a release patch
+   (`release-starts-sbom`, `release-calls-sbom`), the only edit is the one job from
+   [`hardening.md`](references/hardening.md), "Running after the release publishes", added
+   at the end of `jobs:`; the publish jobs themselves are not touched. Otherwise
+   (`immutable_input: none`):
+   - Insert the version step, the SBOM generation and the upload into the
      job that builds the release, after the build steps the SBOM must describe. Open the
-     inserted block with a comment naming what it does and its upload names, and that the
-     upload fails until permission is granted. `continue-on-error: true` on the inserted
-     steps unless `hook.blocks_release` is true.
+     inserted block with the same short comment as a new workflow's header
+     ([`hardening.md`](references/hardening.md)), give the upload step its one-line
+     authorization comment, and add the version variables (`CYCLONEDX_SPEC_VERSION` and
+     each `<TOOL>_VERSION`) to that job's `env:`, not to the workflow's top level.
+     `continue-on-error: true` on the inserted steps unless `hook.blocks_release` is true.
    - Add `id-token: write` to that job's `permissions:`, keeping everything it already
      has; without it the upload cannot get its OIDC token. A job with no `permissions:`
      block gets one listing the workflow-level permissions plus `id-token: write`, because
@@ -402,14 +436,14 @@ their checkout steps will not get applied.
 ## 5. The hardening contract
 
 [`references/hardening.md`](references/hardening.md) is the single source for the skeleton,
-the rule-by-rule detail, the two justified suppressions, and the emit-time audit. Every
+the rule-by-rule detail, the one justified suppression, and the emit-time audit. Every
 workflow you generate satisfies it in full. The rules, in brief — each one a finding class
 from the `zizmor` audit of the earlier prototypes:
 
 full-SHA action pins · top-level `permissions: contents: read` · `id-token: write` on the
 uploading job only · `persist-credentials: false` on every checkout · no `${{ }}` inside
-`run:` · no `workflow_run` · `set -euo pipefail` · `jq -e` gates per document, before the
-upload · `cache: false` on every `setup-*`.
+`run:` · no `workflow_run` · `set -euo pipefail` · dependency caching off on every setup
+action, written the way that action expects (`cache: false` is wrong for some of them).
 
 Two standing preferences:
 
@@ -445,28 +479,30 @@ sha=$(gh api repos/eclipse-csi/workflows/commits/main --jq .sha)   # → @<sha> 
 ```
 
 Pin non-actions the same way: generator versions, CLI versions, container images **by
-digest**.
+digest**. Tool versions go in the workflow's `env:` block as `<TOOL>_VERSION`, beside
+`CYCLONEDX_SPEC_VERSION` (`hardening.md`, "Versions in one place"), never inside a command.
 
 **If `gh` is unavailable or unauthenticated, stop.** Do not fall back to a SHA written in
 any reference file, and do not emit a floating tag — a floating tag is itself a hardening
 violation, so generating one is worse than generating nothing. Offer the user the choice:
 authenticate, or generate with `# PIN-REQUIRED` placeholders and `status: needs-input`.
 
-## 7. The four gates, and why they earn their place
+## 7. What the workflow does not do
 
-The assertions themselves are in [`hardening.md`](references/hardening.md); they run
-against every document produced, before it is uploaded. What they are for:
+### The SBOM is not checked
 
-1. **Spec version is 1.6.** Several generators default *above* 1.6 and two cannot be
-   pinned at all. This has drifted before and will drift again; the assertion costs
-   nothing.
-2. **`dependencies[]` non-empty.** The single most common failure across every ecosystem:
-   a valid CycloneDX document that is a flat component list. Schema-valid and
-   BSI-non-conformant.
-3. **No vulnerability data.** Trivy always emits the key; ORT populates it if `advise`
-   ran. Both are one flag from breaching BSI TR-03183-2, and VEX is a separate artifact.
-4. **`components[]` non-empty.** Catches a resolution that silently produced nothing —
-   normally a missing credential.
+**Generate no step that checks the SBOM.** The workflow uploads the document exactly as
+the generator wrote it, so its correctness and completeness are not checked: not its spec
+version, not that it lists components and dependencies, not that it carries no
+vulnerability data. Say so in your report; the workflow's header comment stays short and
+does not repeat it.
+
+What still guards those properties is the generator configuration from
+[`tool_selection.md`](references/tool_selection.md): the pinned spec version and the
+flags of each invocation. What nothing catches any more, and the report should not imply
+otherwise: a generator update that changes its default spec version, a flat component
+list with no dependency graph, an empty document from a resolution that silently failed
+(often a missing credential), and vulnerability data from a tool that adds it.
 
 ### Enrichment is out of scope, for now
 
@@ -474,8 +510,8 @@ against every document produced, before it is uploaded. What they are for:
 enrichment step existed to read project facts from a sidecar that is no longer produced,
 and an enrichment step without its data file is a step that warns on every run.
 
-State the consequence rather than leaving it implied, in both the workflow header comment
-and your report: **the generated workflow tops out at what the generator itself emits.**
+State the consequence rather than leaving it implied, in your report (not in the workflow's
+header comment): **the generated workflow tops out at what the generator itself emits.**
 BSI TR-03183-2 required fields 3, 6, 9, 10, 11 and 12 are properties of *delivered files*
 — a shipped filename, the digest of the published artifact, whether a component is an
 executable or an archive — not properties of resolved coordinates, so no dependency
@@ -495,6 +531,9 @@ Then ask:
 3. For multi-repo products — is the host repo right?
 4. Are the upload names right? Permission is granted per name, and a name is hard to
    change once SBOMs have been uploaded under it.
+
+Name every product whose release workflow will change (`extend-existing`, or a release
+patch from `hook.after_publish`), and how: that is the change a maintainer looks at hardest.
 
 One table is a smaller ask than several hundred lines of YAML someone has to read to
 discover a product was routed wrong — and the last cheap place to catch it before a
@@ -517,13 +556,18 @@ The path is a label on the content, not a file that exists:
   visible in the repo's Actions list once installed, not only in a comment.
 - For `extend-existing`, the path is the **existing** workflow being edited, and the content
   is that whole workflow with the SBOM steps added — see §4.
-- The workflow's own header comment carries what an install document would: every secret
-  that must exist and what each is for, expected first-run behaviour (the upload names and
-  the version each run uploads), the recorded coverage gaps in plain language, that the
-  upload fails until permission for its names is granted and the ticket in §12 requests
-  it, and a `zizmor` line the maintainer can run before installing. It travels
-  with the content, which is the point — a header comment cannot be separated from the
-  workflow it describes the way a sibling `.md` can.
+- When the release workflow starts or calls the SBOM workflow, there is a second file: the
+  release workflow with the one added job (`pipeline.release_patch`, §4 "After the release
+  publishes"), its path the release workflow's own.
+- The workflow's header comment is short, in the form of the skeleton in
+  [`hardening.md`](references/hardening.md): the products it makes SBOMs for (its upload
+  names), that it was generated with the help of the Eclipse CSI sbom plugin, and where the
+  SBOMs are uploaded and how to view them. Then, only when they apply, one line naming what
+  is not covered and one naming the secrets the build needs. No date, routing-table
+  revision, score, enrichment note or permission-request text: those go in your report.
+  Under the header, the `env:` block holds `CYCLONEDX_SPEC_VERSION` and every tool version,
+  and the upload step carries a one-line comment that it fails until uploads are
+  authorized.
 
 ## 10. Self-audit before recording
 
@@ -555,8 +599,9 @@ working directory or in a clone.
 Run the structural checks and the auditors from
 [`hardening.md`](references/hardening.md) §"Emit-time audit" over the scratch copy. A High
 finding blocks unless it is individually suppressed with a written justification, stated in
-your report — **exactly two** are justified, both set out there. **Anything else is a real
-finding: regenerate, do not suppress.**
+your report — **exactly one** is justified, set out there. **Anything else is a real
+finding: regenerate, do not suppress.** Audit a release patch with `release-patch` as the
+audit's second argument: it starts or calls the SBOM workflow and has no upload of its own.
 
 For a patch, run the same checks over the base file too. A failure or finding the base
 already has is the maintainer's existing problem — note it and do not fix it (§4); only
@@ -586,6 +631,11 @@ workflow differs from the one the maintainer read is worse than no record, becau
 look authoritative. The validator warns when `content` does not match `sha256`: re-record
 the content from the audited file until it does not, or `/write-workflow` will flag it as
 edited since the audit.
+
+`pipeline.release_patch` holds the second file when the release workflow starts or calls
+the SBOM workflow (§4, "After the release publishes"): the same fields as a patch in
+`pipeline.workflow` (`install_as` is `after_publish.workflow`, `kind: patch`, `content`,
+`sha256`, `base_sha256`, `base_ref`), recorded and printed the same way.
 
 `pipeline.upload_names` lists every name the workflow uploads under (see "Upload names"),
 for every product whose workflow uploads. For an `already-conformant` product still on the
@@ -634,7 +684,8 @@ python3 "<skill base directory>/../validate-report.py"
 Print the workflow. For every product you generated one for, the reply contains the full
 YAML in a fenced block, headed by the path it belongs at — that reply is the only rendering
 of it a maintainer gets, so a truncated or elided one leaves them nothing to copy. For a
-patch, print the full diff from §4 instead.
+patch, print the full diff from §4 instead. A product with a release patch gets both: its
+SBOM workflow in full, and the diff of its release workflow.
 
 Alongside each, per product: generator and assessment, status, the trigger, and the
 coverage gaps in prose.
@@ -645,6 +696,9 @@ Flag explicitly:
 - **Every `partial`** — what the SBOM will not contain, in terms of what is missing rather
   than "limited support".
 - **Every `manual` trigger** — SBOM generation is not automatic for that product.
+- **Every product that follows publishing** (`hook.after_publish`): what it waits for, the
+  option chosen, which release workflow changes, and that the SBOM workflow must be
+  committed before the next release is tagged.
 - **Every product needing secrets**, and that the workflow fails until they exist.
 - **Every matrixed product**, and the upload names it therefore needs.
 - **Any target with no GitHub-hosted runner**, and that its platform is uncovered.

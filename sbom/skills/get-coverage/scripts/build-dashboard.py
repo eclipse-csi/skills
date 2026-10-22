@@ -6,7 +6,8 @@ product:
   - the primary build ecosystem (from root-level build files; images count as their own)
   - the CI platform (GitHub Actions workflows / Jenkinsfile)
   - whether it is active (a push to any of its repos in the 180 days before --as-of)
-and embeds the data into assets/dashboard.template.html.
+and per project its stars, watchers and forks, totalled over all its GitHub repos, and
+embeds the data into assets/dashboard.template.html.
 """
 
 import argparse
@@ -91,13 +92,26 @@ def best_trigger(repo_facts: list):
                key=lambda t: RELEASE_RANK.get(t, 0), default=None)
 
 
-def candidate_signals(rows: list, products: dict, facts: dict, projects: dict) -> list:
+POPULARITY = ("stars", "watchers", "forks")
+
+
+def popularity_totals(repo_facts: list) -> dict:
+    """Stars, watchers and forks summed over a project's repos; None when not collected."""
+    found = [f for f in repo_facts if f.get("found")]
+    known = bool(found) and all(k in f for f in found for k in POPULARITY)
+    return {k: sum(f[k] for f in found) if known else None for k in POPULARITY}
+
+
+def candidate_signals(rows: list, products: dict, facts: dict, projects: dict,
+                      project_repos: dict) -> list:
     """Per-project signals for the "Easy Candidates for New Adopters" table.
 
     The page applies the conditions (no SBOM yet, active, GitHub Actions, not C/C++ or
     Tycho/p2, GitHub Releases, clear release trigger) as user-toggled filters; this only
     provides each project's facts and a priority score: popular ecosystems, GitHub Actions
-    only, a clear release trigger and GitHub Releases present.
+    only, a clear release trigger and GitHub Releases present. Stars, watchers and forks
+    cover all of the project's GitHub repos (project_repos, as in github-repos.json), not
+    only its product repos.
     """
     by_project = {}
     for r in rows:
@@ -116,11 +130,14 @@ def candidate_signals(rows: list, products: dict, facts: dict, projects: dict) -
             popular = 1 if ecos & POPULAR else 0
         score = popular + (2 if gha_only else 0) + RELEASE_RANK.get(trigger, 0) + (1 if has_releases else 0)
         meta = projects.get(name, {})
-        out.append({"p": name, "tl": meta.get("top_level_project") or "?", "st": meta.get("state") or "?",
+        all_repos = {u for urls in project_repos.get(name, {}).values() for u in urls}
+        out.append({"p": name, "id": meta.get("project_id"),
+                    "tl": meta.get("top_level_project") or "?", "st": meta.get("state") or "?",
                     "n": len(prs), "sb": sum(r["sb"] for r in prs), "wf": len(repos), "eco": sorted(ecos),
                     "gha_only": gha_only, "release": RELEASE_LABEL[trigger],
                     "rel_ok": RELEASE_RANK.get(trigger, 0) >= 3, "releases": has_releases,
-                    "popular": popular == 3, "score": score})
+                    "popular": popular == 3, "score": score, "nrepos": len(all_repos),
+                    **popularity_totals([facts.get(u, {}) for u in all_repos])})
     out.sort(key=lambda e: (-e["score"], e["wf"], e["n"], e["p"].lower()))
     return out
 
@@ -169,7 +186,7 @@ def main() -> int:
                      "sb": sum(bool(e.get("sbom_uploaded")) for e in v.values())}
                     for n, v in products.items()]
 
-    easy = candidate_signals(rows, products, facts, projects)
+    easy = candidate_signals(rows, products, facts, projects, repos)
     data = json.dumps({"products": rows, "projects": project_rows, "easy": easy},
                       separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
     repo_count = sum(len(u) for orgs in repos.values() for u in orgs.values())

@@ -18,7 +18,7 @@ Run every command from a working directory of your choice (not inside the skill)
 | File | What it is |
 |---|---|
 | `github-repos.json`, `github-projects.json` | projects → GitHub orgs → repos, and project metadata |
-| `github-repo-facts.json` | per-repo GitHub facts (manifests, releases, tags, CI, release triggers and publish steps of each workflow) |
+| `github-repo-facts.json` | per-repo GitHub facts (manifests, releases, tags, CI, release triggers and publish steps of each workflow, stars, watchers, forks) |
 | `github-products.json` | project → product → `{repos, image?, sbom_uploaded}`, **the main output** |
 | `products-with-sboms.json` | products that have an SBOM in Dependency-Track |
 | `sbom-adoption.html` | the dashboard, also published as an artifact |
@@ -59,8 +59,10 @@ Three passes: GraphQL metadata and root manifests, the file tree per repo, and e
 GitHub Actions workflow file. From the workflow files it records `release_trigger` (the
 strongest signal of a publishing workflow: `release`, `tag`, `manual`, `push` or `null`) and
 `release_workflows` (each workflow's triggers and publish steps). The dashboard's
-"Easy Candidates for New Adopters" filters and ranking use these. To refresh only the workflow signals into an
-existing facts file, add `--release-signals-only`.
+"Easy Candidates for New Adopters" filters and ranking use these. Each repo's `stars`,
+`watchers` and `forks` are recorded too; the same table totals them per project and can sort
+by them. To refresh only the workflow signals into an existing facts file, add
+`--release-signals-only`; to refresh only stars, watchers and forks, add `--popularity-only`.
 
 ### 3. Plan the analysis
 ```sh
@@ -133,9 +135,13 @@ python3 $S/build-dashboard.py      # -> sbom-adoption.html
 ```
 `sbom-adoption.html` is a self-contained page; open it locally or share the file. If the
 Artifact tool is available, publish it: when `.sbom-coverage/state.json` has a
-`dashboard_url`, pass it as `url` to update the existing page; otherwise publish a new one
-with `icon: "chart"` and save the returned URL to `state.json` as
-`{"dashboard_url": "…"}`. The page design lives in
+`dashboard_url`, pass it as `url` to update the existing page (leave `capabilities` out, so
+the stored ones carry over); otherwise publish a new one with `icon: "chart"` and
+`capabilities: {"db": {"rules": [{"path": "done", "read": "view", "write": "admin"}]}}`, and
+save the returned URL to `state.json` as `{"dashboard_url": "…"}`. That `db` store holds the
+Easy Candidates "Done" ticks (collection `done`, one document per project id): everyone who
+can open the page sees them, only people with edit access change them, and they survive
+every republish. A new dashboard artifact starts with none. The page design lives in
 `assets/dashboard.template.html`; change the design there, not in the generated file.
 
 **Dashboard changes always go through this skill.** When asked to change the dashboard, even a
